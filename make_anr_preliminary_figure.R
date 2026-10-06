@@ -910,11 +910,14 @@ network_targets <- network_targets %>%
 
 edge_df <- network_targets %>%
   dplyr::transmute(
+    target_x = x,
+    target_y = y,
     x = 0,
     y = 0,
-    xend = 0.90 * x,
-    yend = 0.90 * y,
-    regulation
+    xend = 0.88 * target_x,
+    yend = 0.88 * target_y,
+    mor = mor,
+    regulation = regulation
   )
 
 # Scale node sizes explicitly so the biological meaning is readable even when
@@ -954,12 +957,12 @@ p_targets <- ggplot2::ggplot() +
       yend = yend,
       color = regulation
     ),
-    linewidth = 0.85,
-    alpha = 0.85,
+    linewidth = 1.05,
+    alpha = 0.95,
     arrow = grid::arrow(
       type = "closed",
       length = grid::unit(
-        2.1,
+        2.3,
         "mm"
       )
     )
@@ -1001,7 +1004,14 @@ p_targets <- ggplot2::ggplot() +
     ggplot2::aes(
       x = label_x,
       y = label_y,
-      label = gene,
+      label = paste0(
+        gene,
+        ifelse(
+          mor > 0,
+          "  (+)",
+          "  (-)"
+        )
+      ),
       hjust = label_hjust
     ),
     size = 2.8,
@@ -1012,7 +1022,11 @@ p_targets <- ggplot2::ggplot() +
       "Activation" = "#B2182B",
       "Repression" = "#2166AC"
     ),
-    name = "CollecTRI mor"
+    labels = c(
+      "Activation" = "mor > 0  activation",
+      "Repression" = "mor < 0  repression"
+    ),
+    name = "CollecTRI mode of regulation"
   ) +
   ggplot2::scale_fill_gradient2(
     low = "#2166AC",
@@ -1053,10 +1067,10 @@ p_targets <- ggplot2::ggplot() +
     plot.tag.position = c(0.01, 0.99),
     legend.position = "right",
     legend.title = ggplot2::element_text(
-      size = 7.0
+      size = 7.2
     ),
     legend.text = ggplot2::element_text(
-      size = 6.8
+      size = 7.0
     ),
     legend.key.height = grid::unit(
       0.30,
