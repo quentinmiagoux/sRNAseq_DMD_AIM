@@ -331,7 +331,7 @@ p_umap <- ggplot2::ggplot(
     inherit.aes = FALSE,
     size = 3.1,
     fontface = "bold",
-    label.size = 0,
+    linewidth = 0,
     fill = grDevices::adjustcolor(
       "white",
       alpha.f = 0.78
@@ -716,10 +716,10 @@ if (!all(c("sample", "source", "estimate") %in% colnames(ap1_cell))) {
 
 cell_meta <- obj@meta.data %>%
   tibble::rownames_to_column(
-    "sample"
+    "cell_id"
   ) %>%
   dplyr::transmute(
-    sample = as.character(sample),
+    cell_id = as.character(cell_id),
     celltype = as.character(.data[[CELLTYPE_COL]]),
     condition = as.character(.data[[CONDITION_COL]])
   )
@@ -729,12 +729,15 @@ violin_df <- ap1_cell %>%
     source == TF_FOCUS
   ) %>%
   dplyr::mutate(
-    sample = as.character(sample),
+    cell_id = as.character(sample),
     estimate = as.numeric(estimate)
+  ) %>%
+  dplyr::select(
+    -sample
   ) %>%
   dplyr::inner_join(
     cell_meta,
-    by = "sample"
+    by = "cell_id"
   ) %>%
   dplyr::filter(
     condition == DMD_LABEL,
