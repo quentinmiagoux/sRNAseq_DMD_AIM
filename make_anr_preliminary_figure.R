@@ -24,8 +24,7 @@ cran_pkgs <- c(
   "dplyr",
   "ggplot2",
   "patchwork",
-  "tibble",
-  "svglite"
+  "tibble"
 )
 
 missing_cran <- cran_pkgs[
@@ -578,7 +577,7 @@ ggplot2::ggsave(
   width = 12.2,
   height = 5.2,
   units = "in",
-  device = svglite::svglite
+  device = grDevices::svg
 )
 
 message(
