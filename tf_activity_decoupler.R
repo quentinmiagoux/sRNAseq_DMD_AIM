@@ -858,10 +858,7 @@ top_tfs <- tf_all %>%
     dplyr::desc(max_abs_activity)
   ) %>%
   dplyr::slice_head(
-    n = min(
-      TOP_TF_HEATMAP,
-      dplyr::n()
-    )
+    n = TOP_TF_HEATMAP
   ) %>%
   dplyr::pull(source)
 
