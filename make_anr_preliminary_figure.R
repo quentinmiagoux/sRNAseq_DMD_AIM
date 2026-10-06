@@ -4,13 +4,13 @@
 # ANR preliminary-data figure: DMD snRNA-seq + TF activity
 #
 # Panel A  : real snRNA-seq UMAP
-# Panel B1 : AP1 + top candidate TF activity heatmap (donor-aware pseudobulk)
-# Panel B2 : per-nucleus AP1 activity distribution across DMD cell populations
+# Panel B  : top 10 candidate TF activity heatmap (donor-aware pseudobulk)
+# Panel C  : per-nucleus JUN activity distribution across DMD cell populations
 #
 # Statistical interpretation:
 # - The heatmap is the inferential result: donor-aware pseudobulk DESeq2
 #   followed by CollecTRI + decoupleR ULM.
-# - The violin plot is an exploratory per-nucleus visualization of AP1 activity.
+# - The violin plot is an exploratory per-nucleus visualization of JUN activity.
 #   It is not used for donor-level hypothesis testing.
 # ==============================================================================
 
@@ -115,10 +115,10 @@ CONDITION_COL <- "condition"
 CTRL_LABEL <- "CTRL"
 DMD_LABEL <- "DMD"
 
-TF_FOCUS <- "AP1"
+TF_FOCUS <- "JUN"
 
-# AP1 + four contextual candidate TFs
-TOP_N_TF <- 5
+# Top 10 statistically supported TFs; JUN is always retained for the ANR focus.
+TOP_N_TF <- 10
 
 # Display only. Raw ULM scores remain unchanged.
 ACTIVITY_DISPLAY_LIMIT <- 4
@@ -216,7 +216,7 @@ if (!all(c("source", "celltype", "estimate") %in% colnames(tf_all))) {
 
 if (!TF_FOCUS %in% unique(tf_all$source)) {
   stop(
-    "AP1 is not present in the donor-aware TF activity table."
+    "JUN is not present in the donor-aware TF activity table."
   )
 }
 
@@ -290,24 +290,6 @@ if (length(missing_colors) > 0) {
   )
 }
 
-centroids <- emb %>%
-  dplyr::filter(
-    !is.na(celltype),
-    celltype != ""
-  ) %>%
-  dplyr::group_by(celltype) %>%
-  dplyr::summarise(
-    UMAP_1 = stats::median(
-      UMAP_1,
-      na.rm = TRUE
-    ),
-    UMAP_2 = stats::median(
-      UMAP_2,
-      na.rm = TRUE
-    ),
-    .groups = "drop"
-  )
-
 p_umap <- ggplot2::ggplot(
   emb,
   ggplot2::aes(
@@ -317,38 +299,18 @@ p_umap <- ggplot2::ggplot(
   )
 ) +
   ggplot2::geom_point(
-    size = 0.16,
-    alpha = 0.65,
+    size = 0.20,
+    alpha = 0.82,
     stroke = 0
-  ) +
-  ggplot2::geom_label(
-    data = centroids,
-    ggplot2::aes(
-      x = UMAP_1,
-      y = UMAP_2,
-      label = celltype
-    ),
-    inherit.aes = FALSE,
-    size = 3.1,
-    fontface = "bold",
-    linewidth = 0,
-    fill = grDevices::adjustcolor(
-      "white",
-      alpha.f = 0.78
-    ),
-    color = "black",
-    label.padding = grid::unit(
-      0.08,
-      "lines"
-    )
   ) +
   ggplot2::scale_color_manual(
     values = CELLTYPE_COLORS,
-    drop = FALSE
+    drop = FALSE,
+    name = NULL
   ) +
   ggplot2::coord_equal() +
   ggplot2::labs(
-    title = "A  Previous snRNA-seq analysis identifies\ncell populations in DMD muscle",
+    tag = "A",
     x = "UMAP 1",
     y = "UMAP 2"
   ) +
@@ -356,17 +318,28 @@ p_umap <- ggplot2::ggplot(
     base_size = 9
   ) +
   ggplot2::theme(
-    plot.title = ggplot2::element_text(
+    plot.tag = ggplot2::element_text(
       face = "bold",
-      size = 11.5,
-      hjust = 0
+      size = 15
     ),
+    plot.tag.position = c(0.01, 0.99),
     axis.title = ggplot2::element_text(
       size = 9
     ),
     axis.text = ggplot2::element_blank(),
     axis.ticks = ggplot2::element_blank(),
-    legend.position = "none",
+    legend.position = "right",
+    legend.text = ggplot2::element_text(
+      size = 7.8
+    ),
+    legend.key.height = grid::unit(
+      0.30,
+      "cm"
+    ),
+    legend.key.width = grid::unit(
+      0.30,
+      "cm"
+    ),
     plot.margin = ggplot2::margin(
       6, 6, 6, 6
     )
@@ -382,13 +355,29 @@ tf_rank <- tf_all %>%
   ) %>%
   dplyr::group_by(source) %>%
   dplyr::summarise(
+    n_sig = sum(
+      !is.na(padj) & padj < 0.05
+    ),
+    best_padj = ifelse(
+      any(is.finite(padj)),
+      min(
+        padj[is.finite(padj)],
+        na.rm = TRUE
+      ),
+      Inf
+    ),
     max_abs_activity = max(
       abs(estimate),
       na.rm = TRUE
     ),
     .groups = "drop"
   ) %>%
+  dplyr::filter(
+    n_sig > 0
+  ) %>%
   dplyr::arrange(
+    dplyr::desc(n_sig),
+    best_padj,
     dplyr::desc(max_abs_activity)
   )
 
@@ -402,12 +391,14 @@ context_tfs <- tf_rank %>%
   dplyr::pull(source) %>%
   as.character()
 
-top_tfs <- c(
-  TF_FOCUS,
-  context_tfs
+top_tfs <- unique(
+  c(
+    TF_FOCUS,
+    context_tfs
+  )
 )
 
-# Order populations by AP1 differential activity to make the signal obvious.
+# Order populations by JUN differential activity to make the signal obvious.
 celltype_order <- tf_all %>%
   dplyr::filter(
     source == TF_FOCUS,
@@ -481,8 +472,7 @@ p_heat <- ggplot2::ggplot(
     name = "ULM score"
   ) +
   ggplot2::labs(
-    title = "Candidate regulator activity across cell populations",
-    subtitle = "AP1 highlighted with four contextual TFs | DMD vs CTRL",
+    tag = "B",
     x = NULL,
     y = NULL
   ) +
@@ -490,13 +480,11 @@ p_heat <- ggplot2::ggplot(
     base_size = 8.5
   ) +
   ggplot2::theme(
-    plot.title = ggplot2::element_text(
+    plot.tag = ggplot2::element_text(
       face = "bold",
-      size = 10
+      size = 15
     ),
-    plot.subtitle = ggplot2::element_text(
-      size = 7.8
-    ),
+    plot.tag.position = c(0.01, 0.99),
     axis.text.x = ggplot2::element_text(
       angle = 38,
       hjust = 1,
@@ -521,7 +509,7 @@ p_heat <- ggplot2::ggplot(
   )
 
 # ------------------------------------------------------------------------------
-# 5. COLLECTRI AP1 REGULON FOR PER-NUCLEUS EXPLORATORY ACTIVITY
+# 5. COLLECTRI JUN REGULON FOR PER-NUCLEUS EXPLORATORY ACTIVITY
 # ------------------------------------------------------------------------------
 
 # Avoid an OmnipathR dependency here. In the current conda environment,
@@ -624,21 +612,21 @@ message(
   " regulators."
 )
 
-ap1_net <- collectri %>%
+focus_net <- collectri %>%
   dplyr::filter(
     source == TF_FOCUS
   )
 
-if (nrow(ap1_net) < MIN_REGULON_SIZE) {
+if (nrow(focus_net) < MIN_REGULON_SIZE) {
   stop(
-    "AP1 regulon is too small after loading CollecTRI: ",
-    nrow(ap1_net),
+    "JUN regulon is too small after loading CollecTRI: ",
+    nrow(focus_net),
     " interactions."
   )
 }
 
 # ------------------------------------------------------------------------------
-# 6. PANEL B2 -- AP1 PER-NUCLEUS ACTIVITY VIOLIN
+# 6. PANEL C -- JUN PER-NUCLEUS ACTIVITY VIOLIN
 # ------------------------------------------------------------------------------
 
 DefaultAssay(obj) <- ASSAY
@@ -649,66 +637,66 @@ expr <- Seurat::GetAssayData(
   layer = "data"
 )
 
-ap1_targets <- intersect(
+focus_targets <- intersect(
   rownames(expr),
-  unique(ap1_net$target)
+  unique(focus_net$target)
 )
 
-ap1_net_use <- ap1_net %>%
+focus_net_use <- focus_net %>%
   dplyr::filter(
-    target %in% ap1_targets
+    target %in% focus_targets
   )
 
-if (length(ap1_targets) < MIN_REGULON_SIZE) {
+if (length(focus_targets) < MIN_REGULON_SIZE) {
   stop(
-    "Too few AP1 targets overlap the RNA assay: ",
-    length(ap1_targets)
+    "Too few JUN targets overlap the RNA assay: ",
+    length(focus_targets)
   )
 }
 
 message(
-  "Inferring exploratory per-nucleus AP1 activity from ",
-  length(ap1_targets),
+  "Inferring exploratory per-nucleus JUN activity from ",
+  length(focus_targets),
   " targets..."
 )
 
-# Restrict to AP1 targets before inference to keep memory use manageable.
-expr_ap1 <- expr[
-  ap1_targets,
+# Restrict to JUN targets before inference to keep memory use manageable.
+expr_focus <- expr[
+  focus_targets,
   ,
   drop = FALSE
 ]
 
-ap1_cell <- decoupleR::run_ulm(
-  mat = expr_ap1,
-  network = ap1_net_use,
+focus_cell <- decoupleR::run_ulm(
+  mat = expr_focus,
+  network = focus_net_use,
   .source = "source",
   .target = "target",
   .mor = "mor",
   minsize = MIN_REGULON_SIZE
 )
 
-if ("condition" %in% colnames(ap1_cell) &&
-    !"sample" %in% colnames(ap1_cell)) {
-  ap1_cell <- ap1_cell %>%
+if ("condition" %in% colnames(focus_cell) &&
+    !"sample" %in% colnames(focus_cell)) {
+  focus_cell <- focus_cell %>%
     dplyr::rename(
       sample = condition
     )
 }
 
-if ("score" %in% colnames(ap1_cell) &&
-    !"estimate" %in% colnames(ap1_cell)) {
-  ap1_cell <- ap1_cell %>%
+if ("score" %in% colnames(focus_cell) &&
+    !"estimate" %in% colnames(focus_cell)) {
+  focus_cell <- focus_cell %>%
     dplyr::rename(
       estimate = score
     )
 }
 
-if (!all(c("sample", "source", "estimate") %in% colnames(ap1_cell))) {
+if (!all(c("sample", "source", "estimate") %in% colnames(focus_cell))) {
   stop(
     "Unexpected run_ulm() per-nucleus output columns: ",
     paste(
-      colnames(ap1_cell),
+      colnames(focus_cell),
       collapse = ", "
     )
   )
@@ -724,7 +712,7 @@ cell_meta <- obj@meta.data %>%
     condition = as.character(.data[[CONDITION_COL]])
   )
 
-violin_df <- ap1_cell %>%
+violin_df <- focus_cell %>%
   dplyr::filter(
     source == TF_FOCUS
   ) %>%
@@ -798,22 +786,19 @@ p_violin <- ggplot2::ggplot(
     guide = "none"
   ) +
   ggplot2::labs(
-    title = "AP1 activity across DMD cell populations",
-    subtitle = "Per-nucleus CollecTRI/ULM activity (exploratory visualization)",
+    tag = "C",
     x = NULL,
-    y = "AP1 activity score"
+    y = "JUN activity score"
   ) +
   ggplot2::theme_classic(
     base_size = 8.5
   ) +
   ggplot2::theme(
-    plot.title = ggplot2::element_text(
+    plot.tag = ggplot2::element_text(
       face = "bold",
-      size = 10
+      size = 15
     ),
-    plot.subtitle = ggplot2::element_text(
-      size = 7.6
-    ),
+    plot.tag.position = c(0.01, 0.99),
     axis.text.x = ggplot2::element_text(
       angle = 38,
       hjust = 1,
@@ -834,34 +819,24 @@ p_violin <- ggplot2::ggplot(
 # 7. ASSEMBLE
 # ------------------------------------------------------------------------------
 
-panel_b <- (
+right_panel <- (
   p_heat /
     p_violin
 ) +
   patchwork::plot_layout(
     heights = c(
-      0.95,
-      1.05
-    )
-  ) +
-  patchwork::plot_annotation(
-    title = "B  Preliminary analyses identify AP1 as a candidate regulator",
-    theme = ggplot2::theme(
-      plot.title = ggplot2::element_text(
-        face = "bold",
-        size = 11.5,
-        hjust = 0
-      )
+      1.05,
+      0.95
     )
   )
 
 final_plot <- (
   p_umap |
-    panel_b
+    right_panel
 ) +
   patchwork::plot_layout(
     widths = c(
-      1.0,
+      1.05,
       1.45
     )
   ) &
