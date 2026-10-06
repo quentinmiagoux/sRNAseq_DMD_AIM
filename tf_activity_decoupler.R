@@ -877,6 +877,10 @@ heat_df <- tf_all %>%
     celltype = factor(
       celltype,
       levels = eligible_celltypes
+    ),
+    plot_estimate = pmax(
+      -4,
+      pmin(4, estimate)
     )
   )
 
@@ -885,7 +889,7 @@ p <- ggplot2::ggplot(
   ggplot2::aes(
     x = celltype,
     y = source,
-    fill = estimate
+    fill = plot_estimate
   )
 ) +
   ggplot2::geom_tile() +
@@ -894,13 +898,14 @@ p <- ggplot2::ggplot(
     mid = "white",
     high = "#B2182B",
     midpoint = 0,
+    limits = c(-4, 4),
     name = "TF activity\nULM score"
   ) +
   ggplot2::labs(
     x = NULL,
     y = NULL,
     title = "Differential TF activity in DMD",
-    subtitle = "CollecTRI + decoupleR ULM on DESeq2 Wald statistics"
+    subtitle = "CollecTRI + decoupleR ULM on DESeq2 Wald statistics | display capped at +/-4"
   ) +
   ggplot2::theme_minimal(
     base_size = 11
@@ -969,6 +974,10 @@ for (ct in unique(tf_all$celltype)) {
         estimate >= 0,
         "Higher in DMD",
         "Lower in DMD"
+      ),
+      plot_estimate = pmax(
+        -4,
+        pmin(4, estimate)
       )
     )
 
@@ -980,20 +989,20 @@ for (ct in unique(tf_all$celltype)) {
     top_ct,
     ggplot2::aes(
       x = source,
-      y = estimate,
-      fill = estimate
+      y = plot_estimate,
+      fill = direction
     )
   ) +
     ggplot2::geom_col(
       width = 0.75
     ) +
     ggplot2::coord_flip() +
-    ggplot2::scale_fill_gradient2(
-      low = "#2166AC",
-      mid = "white",
-      high = "#B2182B",
-      midpoint = 0,
-      name = "ULM score"
+    ggplot2::scale_fill_manual(
+      values = c(
+        "Higher in DMD" = "#B2182B",
+        "Lower in DMD" = "#2166AC"
+      ),
+      name = NULL
     ) +
     ggplot2::geom_hline(
       yintercept = 0,
@@ -1001,9 +1010,9 @@ for (ct in unique(tf_all$celltype)) {
     ) +
     ggplot2::labs(
       x = NULL,
-      y = "TF activity (ULM score)",
+      y = "TF activity (ULM score; capped at +/-4)",
       title = paste0("Top ", TOP_TF_BARPLOT, " TF activities - ", ct),
-      subtitle = "DMD vs CTRL | CollecTRI + decoupleR ULM"
+      subtitle = "DMD vs CTRL | red = higher in DMD, blue = lower in DMD"
     ) +
     ggplot2::theme_minimal(
       base_size = 11
