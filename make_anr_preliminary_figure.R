@@ -306,7 +306,13 @@ p_umap <- ggplot2::ggplot(
   ggplot2::scale_color_manual(
     values = CELLTYPE_COLORS,
     drop = FALSE,
-    name = NULL
+    name = NULL,
+    guide = ggplot2::guide_legend(
+      override.aes = list(
+        size = 3.2,
+        alpha = 1
+      )
+    )
   ) +
   ggplot2::coord_equal() +
   ggplot2::labs(
@@ -346,70 +352,220 @@ p_umap <- ggplot2::ggplot(
   )
 
 # ------------------------------------------------------------------------------
-# 4. PANEL B1 -- TOP 5 DIFFERENTIAL TF ACTIVITIES
+# 4. PANEL B -- REPRESENTATIVE DIFFERENTIAL TF ACTIVITIES ACROSS CELL TYPES
 # ------------------------------------------------------------------------------
 
-tf_rank <- tf_all %>%
-  dplyr::filter(
-    is.finite(estimate)
-  ) %>%
-  dplyr::group_by(source) %>%
-  dplyr::summarise(
-    n_sig = sum(
-      !is.na(padj) & padj < 0.05
-    ),
-    best_padj = ifelse(
-      any(is.finite(padj)),
-      min(
-        padj[is.finite(padj)],
-        na.rm = TRUE
-      ),
-      Inf
-    ),
-    max_abs_activity = max(
-      abs(estimate),
-      na.rm = TRUE
-    ),
-    .groups = "drop"
-  ) %>%
-  dplyr::filter(
-    n_sig > 0
-  ) %>%
-  dplyr::arrange(
-    dplyr::desc(n_sig),
-    best_padj,
-    dplyr::desc(max_abs_activity)
-  )
+celltype_priority <- CELLTYPE_ORDER[
+  CELLTYPE_ORDER %in% unique(tf_all$celltype)
+]
 
-context_tfs <- tf_rank %>%
-  dplyr::filter(
-    source != TF_FOCUS
-  ) %>%
-  dplyr::slice_head(
-    n = TOP_N_TF - 1
-  ) %>%
-  dplyr::pull(source) %>%
-  as.character()
-
-top_tfs <- unique(
-  c(
-    TF_FOCUS,
-    context_tfs
-  )
+extra_celltypes <- setdiff(
+  unique(tf_all$celltype),
+  celltype_priority
 )
 
-# Order populations by JUN differential activity to make the signal obvious.
-celltype_order <- tf_all %>%
+celltype_priority <- c(
+  celltype_priority,
+  sort(extra_celltypes)
+)
+
+# Rank TFs independently within each cell population.
+# Primary criterion: adjusted P value.
+# Secondary criterion: absolute ULM activity effect.
+pair_rank <- tf_all %>%
   dplyr::filter(
-    source == TF_FOCUS,
-    is.finite(estimate)
+    is.finite(estimate),
+    !is.na(padj),
+    padj < 0.05
+  ) %>%
+  dplyr::mutate(
+    abs_activity = abs(estimate),
+    celltype = as.character(celltype),
+    source = as.character(source)
+  ) %>%
+  dplyr::group_by(celltype) %>%
+  dplyr::arrange(
+    padj,
+    dplyr::desc(abs_activity),
+    .by_group = TRUE
+  ) %>%
+  dplyr::mutate(
+    cell_rank = dplyr::row_number()
+  ) %>%
+  dplyr::ungroup()
+
+# JUN is the regulator of interest. Use its strongest significant cell-type
+# association as its representative row. If JUN is not formally significant,
+# retain its strongest activity row so the ANR focus remains explicit.
+focus_row <- pair_rank %>%
+  dplyr::filter(
+    source == TF_FOCUS
   ) %>%
   dplyr::arrange(
-    dplyr::desc(estimate)
+    padj,
+    dplyr::desc(abs_activity)
   ) %>%
-  dplyr::pull(celltype) %>%
-  unique() %>%
-  as.character()
+  dplyr::slice_head(
+    n = 1
+  )
+
+if (nrow(focus_row) == 0) {
+
+  focus_row <- tf_all %>%
+    dplyr::filter(
+      source == TF_FOCUS,
+      is.finite(estimate)
+    ) %>%
+    dplyr::mutate(
+      abs_activity = abs(estimate),
+      cell_rank = NA_integer_
+    ) %>%
+    dplyr::arrange(
+      dplyr::desc(abs_activity)
+    ) %>%
+    dplyr::slice_head(
+      n = 1
+    )
+}
+
+selected_rows <- focus_row
+selected_tfs <- unique(
+  as.character(selected_rows$source)
+)
+covered_celltypes <- unique(
+  as.character(selected_rows$celltype)
+)
+
+# First pass: maximise cell-type coverage by taking the best still-unselected
+# significant TF from each population.
+for (ct in celltype_priority) {
+
+  if (length(selected_tfs) >= TOP_N_TF) {
+    break
+  }
+
+  if (ct %in% covered_celltypes) {
+    next
+  }
+
+  candidate <- pair_rank %>%
+    dplyr::filter(
+      celltype == ct,
+      !source %in% selected_tfs
+    ) %>%
+    dplyr::slice_head(
+      n = 1
+    )
+
+  if (nrow(candidate) == 0) {
+    next
+  }
+
+  selected_rows <- dplyr::bind_rows(
+    selected_rows,
+    candidate
+  )
+
+  selected_tfs <- unique(
+    c(
+      selected_tfs,
+      as.character(candidate$source)
+    )
+  )
+
+  covered_celltypes <- unique(
+    c(
+      covered_celltypes,
+      ct
+    )
+  )
+}
+
+# Second pass: if fewer than TOP_N_TF unique TFs were obtained because several
+# populations share the same top regulator, fill with the best remaining
+# within-cell candidates, prioritising rank within each cell population.
+if (length(selected_tfs) < TOP_N_TF) {
+
+  n_missing <- TOP_N_TF - length(selected_tfs)
+
+  filler <- pair_rank %>%
+    dplyr::filter(
+      !source %in% selected_tfs
+    ) %>%
+    dplyr::arrange(
+      cell_rank,
+      padj,
+      dplyr::desc(abs_activity)
+    ) %>%
+    dplyr::distinct(
+      source,
+      .keep_all = TRUE
+    ) %>%
+    dplyr::slice_head(
+      n = n_missing
+    )
+
+  selected_rows <- dplyr::bind_rows(
+    selected_rows,
+    filler
+  )
+
+  selected_tfs <- unique(
+    c(
+      selected_tfs,
+      as.character(filler$source)
+    )
+  )
+}
+
+top_tfs <- selected_tfs[
+  seq_len(
+    min(
+      TOP_N_TF,
+      length(selected_tfs)
+    )
+  )
+]
+
+# Keep a transparent record of why each TF was selected for the ANR figure.
+selection_table <- selected_rows %>%
+  dplyr::filter(
+    source %in% top_tfs
+  ) %>%
+  dplyr::distinct(
+    source,
+    .keep_all = TRUE
+  ) %>%
+  dplyr::transmute(
+    source,
+    representative_celltype = as.character(celltype),
+    estimate,
+    padj,
+    within_cell_rank = cell_rank
+  )
+
+write.table(
+  selection_table,
+  file.path(
+    OUTDIR,
+    "ANR_top10_TF_selection.tsv"
+  ),
+  sep = "\t",
+  quote = FALSE,
+  row.names = FALSE
+)
+
+# Use a biologically readable, fixed cell-type order in the heatmap rather than
+# ordering columns by the JUN effect itself.
+celltype_order <- celltype_priority
+
+message(
+  "ANR TF selection: ",
+  paste(
+    top_tfs,
+    collapse = ", "
+  )
+)
 
 heat_df <- tf_all %>%
   dplyr::filter(
@@ -728,7 +884,10 @@ violin_df <- focus_cell %>%
     by = "cell_id"
   ) %>%
   dplyr::filter(
-    condition == DMD_LABEL,
+    condition %in% c(
+      CTRL_LABEL,
+      DMD_LABEL
+    ),
     celltype %in% celltype_order,
     is.finite(estimate)
   ) %>%
@@ -736,6 +895,13 @@ violin_df <- focus_cell %>%
     celltype = factor(
       celltype,
       levels = celltype_order
+    ),
+    condition = factor(
+      condition,
+      levels = c(
+        CTRL_LABEL,
+        DMD_LABEL
+      )
     )
   )
 
@@ -765,25 +931,40 @@ p_violin <- ggplot2::ggplot(
   ggplot2::aes(
     x = celltype,
     y = plot_estimate,
-    fill = celltype
+    fill = condition,
+    group = interaction(
+      celltype,
+      condition
+    )
   )
 ) +
   ggplot2::geom_violin(
+    position = ggplot2::position_dodge(
+      width = 0.82
+    ),
     scale = "width",
     trim = TRUE,
-    color = "white",
-    linewidth = 0.25,
-    alpha = 0.9
+    color = NA,
+    alpha = 0.88
   ) +
   ggplot2::stat_summary(
+    ggplot2::aes(
+      group = condition
+    ),
     fun = stats::median,
     geom = "point",
-    size = 1.2,
+    position = ggplot2::position_dodge(
+      width = 0.82
+    ),
+    size = 1.15,
     color = "black"
   ) +
   ggplot2::scale_fill_manual(
-    values = CELLTYPE_COLORS,
-    guide = "none"
+    values = c(
+      "CTRL" = "#BDBDBD",
+      "DMD" = "#D95F4E"
+    ),
+    name = NULL
   ) +
   ggplot2::labs(
     tag = "C",
@@ -809,6 +990,14 @@ p_violin <- ggplot2::ggplot(
     ),
     axis.title.y = ggplot2::element_text(
       size = 7.8
+    ),
+    legend.position = "top",
+    legend.text = ggplot2::element_text(
+      size = 7.8
+    ),
+    legend.key.width = grid::unit(
+      0.45,
+      "cm"
     ),
     plot.margin = ggplot2::margin(
       3, 4, 3, 4
