@@ -1506,157 +1506,116 @@ make_jun_mor_consistency <- function(
 make_decoupler_target_plot <- function(
   jun_target_df,
   celltype_focus,
-  top_label_n = 10,
   tag = "C"
 ) {
 
-  lfc_candidates <- c(
+  required_cols <- c(
     "log2FoldChange",
-    "logFC",
-    "logfc",
-    "lfc"
-  )
-  p_candidates <- c(
     "pvalue",
-    "p_value",
-    "padj"
+    "stat",
+    "mor",
+    "gene"
   )
 
-  lfc_col <- lfc_candidates[
-    lfc_candidates %in% colnames(jun_target_df)
-  ][1]
-  p_col <- p_candidates[
-    p_candidates %in% colnames(jun_target_df)
-  ][1]
+  missing_cols <- setdiff(
+    required_cols,
+    colnames(jun_target_df)
+  )
 
-  if (is.na(lfc_col) || length(lfc_col) == 0) {
+  if (length(missing_cols) > 0) {
     stop(
-      "No log-fold-change column found for the decoupleR-style target plot."
+      "Missing columns for decoupleR target plot: ",
+      paste(
+        missing_cols,
+        collapse = ", "
+      )
     )
   }
 
-  if (is.na(p_col) || length(p_col) == 0) {
-    stop(
-      "No p-value column found for the decoupleR-style target plot."
-    )
-  }
-
+  # Reproduce the target-level visualization from the official decoupleR TF
+  # vignette. Red means sign(mor * DE statistic) > 0, blue means < 0.
   plot_df <- jun_target_df %>%
     dplyr::filter(
       celltype == celltype_focus,
+      is.finite(log2FoldChange),
+      is.finite(pvalue),
       is.finite(stat),
       is.finite(mor)
     ) %>%
+    dplyr::arrange(gene) %>%
     dplyr::mutate(
-      logfc_plot = as.numeric(.data[[lfc_col]]),
-      p_plot = as.numeric(.data[[p_col]]),
       p_plot = pmax(
-        p_plot,
+        pvalue,
         .Machine$double.xmin
       ),
-      neglog10_p = -log10(p_plot),
-      mor_x_stat = mor * stat,
-      regulon_support = dplyr::case_when(
-        mor_x_stat > 0 ~ "Supports inferred JUN activity",
-        mor_x_stat < 0 ~ "Opposes inferred JUN activity",
-        TRUE ~ "Neutral"
+      color = "3",
+      color = dplyr::if_else(
+        mor > 0 & stat > 0,
+        "1",
+        color
       ),
-      significant = !is.na(padj) & padj < 0.05,
-      abs_mor = abs(mor)
-    ) %>%
-    dplyr::filter(
-      is.finite(logfc_plot),
-      is.finite(neglog10_p)
+      color = dplyr::if_else(
+        mor > 0 & stat < 0,
+        "2",
+        color
+      ),
+      color = dplyr::if_else(
+        mor < 0 & stat > 0,
+        "2",
+        color
+      ),
+      color = dplyr::if_else(
+        mor < 0 & stat < 0,
+        "1",
+        color
+      )
     )
 
-  label_df <- plot_df %>%
-    dplyr::filter(significant) %>%
-    dplyr::arrange(
-      dplyr::desc(neglog10_p),
-      dplyr::desc(abs(mor_x_stat))
-    ) %>%
-    dplyr::slice_head(
-      n = top_label_n
-    )
+  colors <- rev(
+    RColorBrewer::brewer.pal(
+      n = 11,
+      name = "RdBu"
+    )[c(2, 10)]
+  )
 
   ggplot2::ggplot(
-    plot_df,
-    ggplot2::aes(
-      x = logfc_plot,
-      y = neglog10_p
+    data = plot_df,
+    mapping = ggplot2::aes(
+      x = log2FoldChange,
+      y = -log10(p_plot),
+      color = color,
+      size = abs(mor)
     )
   ) +
     ggplot2::geom_point(
-      ggplot2::aes(
-        size = abs_mor
-      ),
-      shape = 21,
-      fill = "black",
-      color = "black",
-      alpha = 0.85,
-      stroke = 0
+      size = 2.5,
+      color = "black"
     ) +
     ggplot2::geom_point(
-      ggplot2::aes(
-        color = regulon_support,
-        size = abs_mor,
-        alpha = significant
+      size = 1.5
+    ) +
+    ggplot2::scale_colour_manual(
+      values = c(
+        "1" = colors[2],
+        "2" = colors[1],
+        "3" = "grey70"
       )
     ) +
     ggrepel::geom_label_repel(
-      data = label_df,
       ggplot2::aes(
-        label = gene
+        label = gene,
+        size = 1
       ),
-      size = 3.3,
-      label.size = 0.15,
       box.padding = 0.25,
       point.padding = 0.15,
-      max.overlaps = Inf,
-      seed = 1,
-      show.legend = FALSE
+      min.segment.length = 0,
+      seed = 1
     ) +
-    ggplot2::geom_vline(
-      xintercept = 0,
-      linetype = "dotted",
-      color = "grey45",
-      linewidth = 0.4
-    ) +
-    ggplot2::scale_color_manual(
-      values = c(
-        "Supports inferred JUN activity" = "#B2182B",
-        "Opposes inferred JUN activity" = "#2166AC",
-        "Neutral" = "grey65"
-      ),
-      name = "MOR × DESeq2 stat"
-    ) +
-    ggplot2::scale_alpha_manual(
-      values = c(
-        "TRUE" = 0.95,
-        "FALSE" = 0.20
-      ),
-      guide = "none"
-    ) +
-    ggplot2::scale_size_continuous(
-      range = c(
-        2.0,
-        4.2
-      ),
-      name = "|CollecTRI MOR|"
-    ) +
-    ggplot2::labs(
-      x = "log2FC (DMD vs CTRL)",
-      y = paste0(
-        "-log10(",
-        p_col,
-        ")"
-      ),
-      tag = tag
-    ) +
-    ggplot2::theme_classic(
+    ggplot2::theme_minimal(
       base_size = 12
     ) +
     ggplot2::theme(
+      legend.position = "none",
       plot.tag = ggplot2::element_text(
         face = "bold",
         size = 22
@@ -1665,28 +1624,40 @@ make_decoupler_target_plot <- function(
         0.01,
         0.99
       ),
+      plot.title = ggplot2::element_text(
+        face = "bold",
+        size = 14
+      ),
       axis.title = ggplot2::element_text(
         size = 11
       ),
       axis.text = ggplot2::element_text(
         size = 9.5
       ),
-      legend.title = ggplot2::element_text(
-        size = 9.5
-      ),
-      legend.text = ggplot2::element_text(
-        size = 8.5
-      ),
-      legend.key.height = grid::unit(
-        0.34,
-        "cm"
-      ),
+      panel.grid.minor = ggplot2::element_blank(),
       plot.margin = ggplot2::margin(
-        3,
+        4,
         5,
         4,
         4
       )
+    ) +
+    ggplot2::geom_vline(
+      xintercept = 0,
+      linetype = "dotted"
+    ) +
+    ggplot2::geom_hline(
+      yintercept = 0,
+      linetype = "dotted"
+    ) +
+    ggplot2::labs(
+      x = "log2FC (DMD vs CTRL)",
+      y = "-log10(p-value)",
+      title = paste0(
+        "JUN targets - ",
+        celltype_focus
+      ),
+      tag = tag
     )
 }
 ```
@@ -2416,26 +2387,18 @@ figure_buttons(
 ```
 
 
-## C8 - decoupleR-style JUN target evidence using MOR
+## C8 - Official decoupleR-style JUN target view
 
-This follows the target-level visualization used in the official decoupleR
-transcription-factor vignette: x is DMD-vs-CTRL log2 fold change, y is
--log10(p-value), target color is determined by the sign of CollecTRI MOR times
-the DESeq2 Wald statistic, and point size represents the absolute MOR.
+This reproduces the target-level visualization from the official decoupleR
+transcription-factor vignette. Red targets have mor x DESeq2 statistic > 0,
+blue targets have mor x DESeq2 statistic < 0, and grey targets are neutral.
 
 ```{r c8}
 p_c8 <- make_decoupler_target_plot(
   jun_target_df = jun_target_df,
   celltype_focus = jun_best_celltype,
-  top_label_n = 9,
   tag = "C"
-) +
-  ggplot2::ggtitle(
-    paste0(
-      "JUN target evidence — ",
-      jun_best_celltype
-    )
-  )
+)
 
 save_plot(
   p_c8,
@@ -2847,6 +2810,7 @@ p_c8_combo4 <- p_c8 +
       size = 21
     ),
     plot.title = ggplot2::element_text(
+      face = "bold",
       size = 13.5,
       margin = ggplot2::margin(
         b = 4
@@ -2879,8 +2843,8 @@ right_combo4 <- (
 ) +
   patchwork::plot_layout(
     heights = c(
-      0.95,
-      1.35
+      0.85,
+      1.50
     )
   )
 
