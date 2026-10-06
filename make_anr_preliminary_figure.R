@@ -30,8 +30,7 @@ cran_pkgs <- c(
 )
 
 bioc_pkgs <- c(
-  "decoupleR",
-  "OmnipathR"
+  "decoupleR"
 )
 
 missing_cran <- cran_pkgs[
@@ -525,124 +524,105 @@ p_heat <- ggplot2::ggplot(
 # 5. COLLECTRI AP1 REGULON FOR PER-NUCLEUS EXPLORATORY ACTIVITY
 # ------------------------------------------------------------------------------
 
-load_collectri_safe <- function() {
+# Avoid an OmnipathR dependency here. In the current conda environment,
+# OmnipathR pulls xml2/rvest and can fail to compile because of system zlib
+# linkage. CollecTRI provides the signed human regulon directly as a static CSV.
+COLLECTRI_URL <- "https://rescued.omnipathdb.org/CollecTRI.csv"
+COLLECTRI_CACHE <- file.path(
+  OUTDIR,
+  "CollecTRI_human.csv"
+)
 
-  net <- tryCatch(
-    {
-      decoupleR::get_collectri(
-        organism = "human",
-        split_complexes = FALSE
-      )
-    },
-    error = function(e) {
+load_collectri_static <- function() {
 
-      message(
-        "get_collectri() failed; using OmniPath static fallback."
-      )
+  if (!file.exists(COLLECTRI_CACHE)) {
 
-      raw <- OmnipathR::static_table(
-        query = "interactions",
-        resource = "collectri",
-        organism = 9606L,
-        strict_evidences = FALSE,
-        wide = FALSE
-      )
+    message(
+      "Downloading CollecTRI static network..."
+    )
 
-      needed <- c(
-        "source",
-        "source_genesymbol",
-        "target_genesymbol",
-        "is_stimulation"
-      )
-
-      missing <- setdiff(
-        needed,
-        colnames(raw)
-      )
-
-      if (length(missing) > 0) {
-        stop(
-          "Unexpected CollecTRI table. Missing: ",
-          paste(missing, collapse = ", ")
+    ok <- tryCatch(
+      {
+        utils::download.file(
+          url = COLLECTRI_URL,
+          destfile = COLLECTRI_CACHE,
+          mode = "wb",
+          quiet = FALSE
         )
+        TRUE
+      },
+      error = function(e) {
+        message(
+          "CollecTRI download failed: ",
+          conditionMessage(e)
+        )
+        FALSE
       }
+    )
 
-      is_complex <- grepl(
-        "COMPLEX",
-        raw$source,
-        fixed = TRUE
+    if (!ok || !file.exists(COLLECTRI_CACHE)) {
+      stop(
+        "Could not download CollecTRI from: ",
+        COLLECTRI_URL
       )
-
-      interactions <- raw[
-        !is_complex,
-        ,
-        drop = FALSE
-      ]
-
-      complexes <- raw[
-        is_complex,
-        ,
-        drop = FALSE
-      ]
-
-      if (nrow(complexes) > 0) {
-
-        complexes$source_genesymbol <- ifelse(
-          grepl(
-            "JUN|FOS",
-            complexes$source_genesymbol
-          ),
-          "AP1",
-          ifelse(
-            grepl(
-              "REL|NFKB",
-              complexes$source_genesymbol
-            ),
-            "NFKB",
-            complexes$source_genesymbol
-          )
-        )
-      }
-
-      dplyr::bind_rows(
-        interactions,
-        complexes
-      ) %>%
-        dplyr::distinct(
-          source_genesymbol,
-          target_genesymbol,
-          .keep_all = TRUE
-        ) %>%
-        dplyr::mutate(
-          mor = dplyr::case_when(
-            is_stimulation == 1 ~ 1,
-            is_stimulation == 0 ~ -1,
-            TRUE ~ NA_real_
-          )
-        ) %>%
-        dplyr::transmute(
-          source = source_genesymbol,
-          target = target_genesymbol,
-          mor = mor
-        ) %>%
-        dplyr::filter(
-          !is.na(source),
-          !is.na(target),
-          !is.na(mor)
-        )
     }
+  }
+
+  raw <- utils::read.csv(
+    COLLECTRI_CACHE,
+    stringsAsFactors = FALSE,
+    check.names = FALSE
   )
 
-  net %>%
-    dplyr::select(
+  required_cols <- c(
+    "source",
+    "target",
+    "weight"
+  )
+
+  missing_cols <- setdiff(
+    required_cols,
+    colnames(raw)
+  )
+
+  if (length(missing_cols) > 0) {
+    stop(
+      "Unexpected CollecTRI static CSV format. Missing: ",
+      paste(missing_cols, collapse = ", "),
+      "\nAvailable columns: ",
+      paste(colnames(raw), collapse = ", ")
+    )
+  }
+
+  raw %>%
+    dplyr::transmute(
+      source = as.character(source),
+      target = as.character(target),
+      mor = as.numeric(weight)
+    ) %>%
+    dplyr::filter(
+      !is.na(source),
+      !is.na(target),
+      is.finite(mor),
+      source != "",
+      target != ""
+    ) %>%
+    dplyr::distinct(
       source,
       target,
-      mor
-    ) %>%
-    dplyr::distinct()
+      .keep_all = TRUE
+    )
 }
 
-collectri <- load_collectri_safe()
+collectri <- load_collectri_static()
+
+message(
+  "CollecTRI loaded: ",
+  nrow(collectri),
+  " interactions; ",
+  dplyr::n_distinct(collectri$source),
+  " regulators."
+)
 
 ap1_net <- collectri %>%
   dplyr::filter(
