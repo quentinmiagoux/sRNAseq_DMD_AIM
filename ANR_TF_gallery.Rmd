@@ -177,6 +177,14 @@ save_plot <- function(
     )
   )
 
+  svg_path <- file.path(
+    OUTDIR,
+    paste0(
+      filename,
+      ".svg"
+    )
+  )
+
   ggplot2::ggsave(
     filename = png_path,
     plot = plot,
@@ -194,11 +202,66 @@ save_plot <- function(
     bg = "white"
   )
 
+  # Use base R's SVG device to avoid an additional svglite/system dependency.
+  grDevices::svg(
+    filename = svg_path,
+    width = width,
+    height = height,
+    bg = "white",
+    onefile = TRUE
+  )
+
+  print(plot)
+  grDevices::dev.off()
+
   invisible(
     c(
       png = png_path,
-      pdf = pdf_path
+      pdf = pdf_path,
+      svg = svg_path
     )
+  )
+}
+
+
+figure_buttons <- function(
+  filename,
+  label = NULL
+) {
+
+  if (is.null(label)) {
+    label <- filename
+  }
+
+  href_png <- file.path(
+    OUTDIR,
+    paste0(filename, ".png")
+  )
+
+  href_pdf <- file.path(
+    OUTDIR,
+    paste0(filename, ".pdf")
+  )
+
+  href_svg <- file.path(
+    OUTDIR,
+    paste0(filename, ".svg")
+  )
+
+  html <- paste0(
+    "<div style='margin:8px 0 20px 0;display:flex;gap:8px;align-items:center;flex-wrap:wrap;'>",
+    "<span style='font-weight:600;margin-right:4px;'>", label, "</span>",
+    "<a href='", href_png, "' target='_blank' download ",
+    "style='padding:6px 11px;background:#4D9221;color:white;text-decoration:none;border-radius:5px;'>PNG</a>",
+    "<a href='", href_pdf, "' target='_blank' download ",
+    "style='padding:6px 11px;background:#D95F02;color:white;text-decoration:none;border-radius:5px;'>PDF</a>",
+    "<a href='", href_svg, "' target='_blank' download ",
+    "style='padding:6px 11px;background:#2166AC;color:white;text-decoration:none;border-radius:5px;'>SVG</a>",
+    "</div>"
+  )
+
+  knitr::asis_output(
+    html
   )
 }
 
@@ -635,12 +698,12 @@ make_umap <- function(
       tag = "A"
     ) +
     ggplot2::theme_classic(
-      base_size = 9
+      base_size = 14
     ) +
     ggplot2::theme(
       plot.tag = ggplot2::element_text(
         face = "bold",
-        size = 18
+        size = 25
       ),
       plot.tag.position = c(
         0.01,
@@ -648,10 +711,22 @@ make_umap <- function(
       ),
       legend.position = "right",
       legend.text = ggplot2::element_text(
-        size = 8.5
+        size = 13
+      ),
+      axis.title = ggplot2::element_text(
+        size = 15
       ),
       axis.text = ggplot2::element_blank(),
       axis.ticks = ggplot2::element_blank(),
+      legend.title = ggplot2::element_text(
+        size = 12
+      ),
+      legend.text = ggplot2::element_text(
+        size = 11
+      ),
+      axis.title = ggplot2::element_text(
+        size = 13
+      ),
       plot.margin = ggplot2::margin(
         5,
         5,
@@ -715,7 +790,7 @@ make_B_heatmap_raw <- function(
       ggplot2::aes(
         label = stars
       ),
-      size = 3.7,
+      size = 5.0,
       fontface = "bold"
     ) +
     ggplot2::scale_fill_gradient2(
@@ -735,12 +810,12 @@ make_B_heatmap_raw <- function(
       tag = tag
     ) +
     ggplot2::theme_minimal(
-      base_size = 9
+      base_size = 13
     ) +
     ggplot2::theme(
       plot.tag = ggplot2::element_text(
         face = "bold",
-        size = 18
+        size = 25
       ),
       plot.tag.position = c(
         0.01,
@@ -748,12 +823,23 @@ make_B_heatmap_raw <- function(
       ),
       axis.text.x = ggplot2::element_text(
         angle = 38,
-        hjust = 1
+        hjust = 1,
+        size = 12
       ),
       axis.text.y = ggplot2::element_text(
-        face = "bold"
+        face = "bold",
+        size = 13
       ),
       panel.grid = ggplot2::element_blank(),
+      legend.title = ggplot2::element_text(
+        size = 12
+      ),
+      legend.text = ggplot2::element_text(
+        size = 11
+      ),
+      axis.title = ggplot2::element_text(
+        size = 13
+      ),
       plot.margin = ggplot2::margin(
         5,
         5,
@@ -817,7 +903,7 @@ make_B_heatmap_scaled <- function(
       ggplot2::aes(
         label = stars
       ),
-      size = 3.7,
+      size = 5.0,
       fontface = "bold"
     ) +
     ggplot2::scale_fill_gradient2(
@@ -838,12 +924,12 @@ ULM score"
       tag = tag
     ) +
     ggplot2::theme_minimal(
-      base_size = 9
+      base_size = 13
     ) +
     ggplot2::theme(
       plot.tag = ggplot2::element_text(
         face = "bold",
-        size = 18
+        size = 25
       ),
       plot.tag.position = c(
         0.01,
@@ -851,12 +937,23 @@ ULM score"
       ),
       axis.text.x = ggplot2::element_text(
         angle = 38,
-        hjust = 1
+        hjust = 1,
+        size = 12
       ),
       axis.text.y = ggplot2::element_text(
-        face = "bold"
+        face = "bold",
+        size = 13
       ),
       panel.grid = ggplot2::element_blank(),
+      legend.title = ggplot2::element_text(
+        size = 12
+      ),
+      legend.text = ggplot2::element_text(
+        size = 11
+      ),
+      axis.title = ggplot2::element_text(
+        size = 13
+      ),
       plot.margin = ggplot2::margin(
         5,
         5,
@@ -949,12 +1046,12 @@ make_B_dotplot <- function(
       tag = tag
     ) +
     ggplot2::theme_minimal(
-      base_size = 9
+      base_size = 13
     ) +
     ggplot2::theme(
       plot.tag = ggplot2::element_text(
         face = "bold",
-        size = 18
+        size = 25
       ),
       plot.tag.position = c(
         0.01,
@@ -962,12 +1059,23 @@ make_B_dotplot <- function(
       ),
       axis.text.x = ggplot2::element_text(
         angle = 38,
-        hjust = 1
+        hjust = 1,
+        size = 12
       ),
       axis.text.y = ggplot2::element_text(
-        face = "bold"
+        face = "bold",
+        size = 13
       ),
       panel.grid.minor = ggplot2::element_blank(),
+      legend.title = ggplot2::element_text(
+        size = 12
+      ),
+      legend.text = ggplot2::element_text(
+        size = 11
+      ),
+      axis.title = ggplot2::element_text(
+        size = 13
+      ),
       plot.margin = ggplot2::margin(
         5,
         5,
@@ -1054,7 +1162,7 @@ make_source_targets_plot <- function(
       ggplot2::aes(
         label = gene
       ),
-      size = 2.7,
+      size = 4.0,
       box.padding = 0.25,
       point.padding = 0.15,
       max.overlaps = Inf,
@@ -1092,16 +1200,25 @@ activation"
       tag = tag
     ) +
     ggplot2::theme_classic(
-      base_size = 9
+      base_size = 13
     ) +
     ggplot2::theme(
       plot.tag = ggplot2::element_text(
         face = "bold",
-        size = 18
+        size = 25
       ),
       plot.tag.position = c(
         0.01,
         0.99
+      ),
+      legend.title = ggplot2::element_text(
+        size = 12
+      ),
+      legend.text = ggplot2::element_text(
+        size = 11
+      ),
+      axis.title = ggplot2::element_text(
+        size = 13
       ),
       plot.margin = ggplot2::margin(
         5,
@@ -1206,19 +1323,29 @@ make_jun_lollipop <- function(
       tag = tag
     ) +
     ggplot2::theme_classic(
-      base_size = 9
+      base_size = 13
     ) +
     ggplot2::theme(
       plot.tag = ggplot2::element_text(
         face = "bold",
-        size = 18
+        size = 25
       ),
       plot.tag.position = c(
         0.01,
         0.99
       ),
       axis.text.y = ggplot2::element_text(
-        face = "bold"
+        face = "bold",
+        size = 13
+      ),
+      legend.title = ggplot2::element_text(
+        size = 12
+      ),
+      legend.text = ggplot2::element_text(
+        size = 11
+      ),
+      axis.title = ggplot2::element_text(
+        size = 13
       ),
       plot.margin = ggplot2::margin(
         5,
@@ -1607,6 +1734,16 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import decoupler as dc
 
+plt.rcParams.update({
+    "font.size": 13,
+    "axes.titlesize": 16,
+    "axes.labelsize": 14,
+    "xtick.labelsize": 12,
+    "ytick.labelsize": 12,
+    "legend.fontsize": 11,
+    "legend.title_fontsize": 12,
+})
+
 base = Path("results_tf_activity") / "figures" / "anr_gallery"
 
 tf = pd.read_csv(base / "python_tf_activity.tsv", sep="\t")
@@ -1628,9 +1765,11 @@ def safe_name(x):
 def save_native(fig, stem):
     png = outdir / f"{stem}.png"
     pdf = outdir / f"{stem}.pdf"
+    svg = outdir / f"{stem}.svg"
     fig.savefig(png, dpi=300, bbox_inches="tight", facecolor="white")
     fig.savefig(pdf, bbox_inches="tight", facecolor="white")
-    return png, pdf
+    fig.savefig(svg, bbox_inches="tight", facecolor="white", format="svg")
+    return png, pdf, svg
 
 print("Python:", sys.version.split()[0])
 print("decoupler:", dc.__version__)
@@ -1680,11 +1819,18 @@ p_a <- make_umap(
 save_plot(
   p_a,
   "panel_A_umap",
-  width = 8,
-  height = 6
+  width = 11,
+  height = 8
 )
 
 p_a
+```
+
+```{r panel-a-downloads, echo=FALSE, results='asis'}
+figure_buttons(
+  "panel_A_umap",
+  "Panel A"
+)
 ```
 
 # Alternative panel B representations {.tabset}
@@ -1705,11 +1851,18 @@ p_b1 <- make_B_heatmap_raw(
 save_plot(
   p_b1,
   "panel_B1_raw_heatmap",
-  width = 10,
-  height = 4.8
+  width = 12,
+  height = 6.5
 )
 
 p_b1
+```
+
+```{r b1-downloads, echo=FALSE, results='asis'}
+figure_buttons(
+  "panel_B1_raw_heatmap",
+  "Panel B1"
+)
 ```
 
 ## B2 - Row-scaled matrixplot-like heatmap
@@ -1729,11 +1882,18 @@ p_b2 <- make_B_heatmap_scaled(
 save_plot(
   p_b2,
   "panel_B2_scaled_heatmap",
-  width = 10,
-  height = 4.8
+  width = 12,
+  height = 6.5
 )
 
 p_b2
+```
+
+```{r b2-downloads, echo=FALSE, results='asis'}
+figure_buttons(
+  "panel_B2_scaled_heatmap",
+  "Panel B2"
+)
 ```
 
 ## B3 - Dotplot
@@ -1751,11 +1911,18 @@ p_b3 <- make_B_dotplot(
 save_plot(
   p_b3,
   "panel_B3_dotplot",
-  width = 10,
-  height = 4.8
+  width = 12,
+  height = 6.5
 )
 
 p_b3
+```
+
+```{r b3-downloads, echo=FALSE, results='asis'}
+figure_buttons(
+  "panel_B3_dotplot",
+  "Panel B3"
+)
 ```
 
 # Alternative panel C representations for JUN {.tabset}
@@ -1787,11 +1954,18 @@ p_c1 <- make_source_targets_plot(
 save_plot(
   p_c1,
   "panel_C1_source_targets_best_celltype",
-  width = 7.5,
-  height = 5.5
+  width = 9,
+  height = 7
 )
 
 p_c1
+```
+
+```{r c1-downloads, echo=FALSE, results='asis'}
+figure_buttons(
+  "panel_C1_source_targets_best_celltype",
+  "Panel C1"
+)
 ```
 
 ## C2 - Source-target view: top three JUN cell types
@@ -1818,11 +1992,18 @@ p_c2 <- make_source_targets_plot(
 save_plot(
   p_c2,
   "panel_C2_source_targets_top3_celltypes",
-  width = 11,
-  height = 6.5
+  width = 13,
+  height = 8
 )
 
 p_c2
+```
+
+```{r c2-downloads, echo=FALSE, results='asis'}
+figure_buttons(
+  "panel_C2_source_targets_top3_celltypes",
+  "Panel C2"
+)
 ```
 
 ## C3 - Leading JUN targets
@@ -1847,11 +2028,18 @@ p_c3 <- make_jun_lollipop(
 save_plot(
   p_c3,
   "panel_C3_jun_lollipop_best_celltype",
-  width = 7.5,
-  height = 5.5
+  width = 9,
+  height = 7
 )
 
 p_c3
+```
+
+```{r c3-downloads, echo=FALSE, results='asis'}
+figure_buttons(
+  "panel_C3_jun_lollipop_best_celltype",
+  "Panel C3"
+)
 ```
 
 # Native Python / decoupler representations {.tabset}
@@ -1889,7 +2077,7 @@ fig_b4 = dc.pl.dotplot(
     cmap="RdBu_r",
     vcenter=0,
     return_fig=True,
-    figsize=(6.5, 5.0),
+    figsize=(8.5, 6.5),
 )
 
 fig_b4.axes[0].set_title(
@@ -1903,6 +2091,13 @@ save_native(
 )
 
 plt.show()
+```
+
+```{r b4-downloads, echo=FALSE, results='asis'}
+figure_buttons(
+  "panel_B4_python_decoupler_dotplot_best_celltype",
+  "Panel B4 (native Python)"
+)
 ```
 
 ## C4 - Native decoupler source-target plot
@@ -1938,7 +2133,7 @@ fig_c4 = dc.pl.source_targets(
     color_pos="#B2182B",
     color_neg="#2166AC",
     return_fig=True,
-    figsize=(6.5, 5.3),
+    figsize=(8.5, 6.8),
 )
 
 fig_c4.axes[0].set_title(
@@ -1957,6 +2152,13 @@ save_native(
 )
 
 plt.show()
+```
+
+```{r c4-downloads, echo=FALSE, results='asis'}
+figure_buttons(
+  "panel_C4_python_decoupler_source_targets_best_celltype",
+  "Panel C4 (native Python)"
+)
 ```
 
 ## C5 - Native source-target plots across the top JUN populations
@@ -1991,7 +2193,7 @@ for ct in top_celltypes:
         color_pos="#B2182B",
         color_neg="#2166AC",
         return_fig=True,
-        figsize=(6.0, 4.8),
+        figsize=(8.0, 6.2),
     )
 
     fig.axes[0].set_title(
@@ -2011,6 +2213,25 @@ for ct in top_celltypes:
 
     plt.show()
     plt.close(fig)
+```
+
+```{r c5-downloads, echo=FALSE, results='asis'}
+for (ct in jun_top_celltypes) {
+  figure_buttons(
+    paste0(
+      "panel_C5_python_decoupler_source_targets_",
+      gsub(
+        "[^A-Za-z0-9._-]+",
+        "_",
+        ct
+      )
+    ),
+    paste0(
+      "Panel C5 - ",
+      ct
+    )
+  )
+}
 ```
 
 ## C6 - Native decoupler network with CollecTRI weights
@@ -2083,7 +2304,7 @@ fig_c6 = dc.pl.network(
     t_label="DESeq2 Wald statistic",
     layout="kk",
     return_fig=True,
-    figsize=(7.0, 6.2),
+    figsize=(9.0, 7.5),
 )
 
 fig_c6.suptitle(
@@ -2097,6 +2318,13 @@ save_native(
 )
 
 plt.show()
+```
+
+```{r c6-downloads, echo=FALSE, results='asis'}
+figure_buttons(
+  "panel_C6_python_decoupler_network_best_celltype",
+  "Panel C6 (native Python)"
+)
 ```
 
 # Candidate combined figures {.tabset}
@@ -2126,6 +2354,13 @@ save_plot(
 combo1
 ```
 
+```{r combo1-downloads, echo=FALSE, results='asis'}
+figure_buttons(
+  "candidate_figure_AB1C1",
+  "Candidate 1"
+)
+```
+
 ## Candidate 2 - A + scaled heatmap + multi-cell-type source-target plot
 
 ```{r combo2}
@@ -2151,6 +2386,13 @@ save_plot(
 combo2
 ```
 
+```{r combo2-downloads, echo=FALSE, results='asis'}
+figure_buttons(
+  "candidate_figure_AB2C2",
+  "Candidate 2"
+)
+```
+
 ## Candidate 3 - A + dotplot + JUN target lollipop
 
 ```{r combo3}
@@ -2174,6 +2416,13 @@ save_plot(
 )
 
 combo3
+```
+
+```{r combo3-downloads, echo=FALSE, results='asis'}
+figure_buttons(
+  "candidate_figure_AB3C3",
+  "Candidate 3"
+)
 ```
 
 # Selection tables
