@@ -684,8 +684,10 @@ make_umap <- function(
       values = CELLTYPE_COLORS,
       drop = FALSE,
       guide = ggplot2::guide_legend(
+        ncol = 2,
+        byrow = TRUE,
         override.aes = list(
-          size = 4,
+          size = 3.5,
           alpha = 1
         )
       ),
@@ -709,10 +711,10 @@ make_umap <- function(
         0.01,
         0.99
       ),
-      legend.position = "right",
+      legend.position = "bottom",
       legend.title = ggplot2::element_blank(),
       legend.text = ggplot2::element_text(
-        size = 13
+        size = 11.5
       ),
       axis.title = ggplot2::element_text(
         size = 15
@@ -2324,15 +2326,23 @@ figure_buttons(
 ## Candidate 1 - A + raw heatmap + single source-target plot
 
 ```{r combo1}
+right_combo1 <- (
+  p_b1 /
+    p_c1
+) +
+  patchwork::plot_layout(
+    heights = c(
+      0.78,
+      1.22
+    )
+  )
+
 combo1 <- p_a +
-  (
-    p_b1 /
-      p_c1
-  ) +
+  right_combo1 +
   patchwork::plot_layout(
     widths = c(
-      1.05,
-      1.35
+      1.10,
+      1.40
     )
   )
 
@@ -2340,7 +2350,7 @@ save_plot(
   combo1,
   "candidate_figure_AB1C1",
   width = 15,
-  height = 8
+  height = 9
 )
 
 combo1
@@ -2356,15 +2366,23 @@ figure_buttons(
 ## Candidate 2 - A + scaled heatmap + multi-cell-type source-target plot
 
 ```{r combo2}
+right_combo2 <- (
+  p_b2 /
+    p_c2
+) +
+  patchwork::plot_layout(
+    heights = c(
+      0.78,
+      1.22
+    )
+  )
+
 combo2 <- p_a +
-  (
-    p_b2 /
-      p_c2
-  ) +
+  right_combo2 +
   patchwork::plot_layout(
     widths = c(
-      1.05,
-      1.35
+      1.10,
+      1.40
     )
   )
 
@@ -2372,7 +2390,7 @@ save_plot(
   combo2,
   "candidate_figure_AB2C2",
   width = 15,
-  height = 8.5
+  height = 9
 )
 
 combo2
@@ -2388,15 +2406,23 @@ figure_buttons(
 ## Candidate 3 - A + dotplot + JUN target lollipop
 
 ```{r combo3}
+right_combo3 <- (
+  p_b3 /
+    p_c3
+) +
+  patchwork::plot_layout(
+    heights = c(
+      0.78,
+      1.22
+    )
+  )
+
 combo3 <- p_a +
-  (
-    p_b3 /
-      p_c3
-  ) +
+  right_combo3 +
   patchwork::plot_layout(
     widths = c(
-      1.05,
-      1.35
+      1.10,
+      1.40
     )
   )
 
@@ -2404,7 +2430,7 @@ save_plot(
   combo3,
   "candidate_figure_AB3C3",
   width = 15,
-  height = 8.5
+  height = 9
 )
 
 combo3
