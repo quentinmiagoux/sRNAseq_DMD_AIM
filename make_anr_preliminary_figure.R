@@ -24,7 +24,8 @@ cran_pkgs <- c(
   "Seurat",
   "dplyr",
   "ggplot2",
-  "patchwork"
+  "patchwork",
+  "ggrepel"
 )
 
 missing_cran <- cran_pkgs[
@@ -50,6 +51,7 @@ suppressPackageStartupMessages({
   library(dplyr)
   library(ggplot2)
   library(patchwork)
+  library(ggrepel)
 })
 
 # ------------------------------------------------------------------------------
@@ -858,243 +860,195 @@ write.table(
   row.names = FALSE
 )
 
-# Build a compact radial network for the ANR figure.
-# The edge carries CollecTRI's mode of regulation (mor), while target-node
-# properties are derived from the donor-aware DMD-vs-CTRL analysis.
-network_targets <- jun_selection %>%
-  dplyr::left_join(
-    focus_net,
-    by = c(
-      "gene" = "target"
-    )
-  ) %>%
-  dplyr::mutate(
-    regulation = dplyr::if_else(
-      mor > 0,
-      "Activation",
-      "Repression"
-    ),
-    node_fill = pmax(
-      -TARGET_DISPLAY_LIMIT,
-      pmin(
-        TARGET_DISPLAY_LIMIT,
-        mean_contribution
-      )
-    )
-  )
-
-# Stable radial coordinates: JUN at the centre, selected targets on a circle.
-angles <- seq(
-  0,
-  2 * pi,
-  length.out = nrow(network_targets) + 1
-)[
-  seq_len(
-    nrow(network_targets)
-  )
-]
-
-network_targets <- network_targets %>%
-  dplyr::mutate(
-    angle = angles,
-    x = cos(angle),
-    y = sin(angle),
-    label_x = 1.18 * cos(angle),
-    label_y = 1.18 * sin(angle),
-    label_hjust = dplyr::if_else(
-      cos(angle) >= 0,
-      0,
-      1
-    )
-  )
-
-edge_df <- network_targets %>%
-  dplyr::transmute(
-    target_x = x,
-    target_y = y,
-    x = 0,
-    y = 0,
-    xend = 0.88 * target_x,
-    yend = 0.88 * target_y,
-    mor = mor,
-    regulation = regulation
-  )
-
-# Scale node sizes explicitly so the biological meaning is readable even when
-# recurrence spans only a few cell types.
-support_min <- min(
-  network_targets$n_supportive,
-  na.rm = TRUE
+# Panel C follows the target-level visualization used in the official
+# decoupleR TF vignette. CollecTRI MOR is used twice: it is the weight used by
+# ULM in Panel B, and here its sign is combined with the DESeq2 Wald statistic
+# to determine whether each JUN target supports or opposes the inferred JUN
+# activity. Point size represents |MOR|.
+jun_best_celltype <- as.character(
+  focus_row$celltype[[1]]
 )
 
-support_max <- max(
-  network_targets$n_supportive,
-  na.rm = TRUE
+required_target_cols <- c(
+  "log2FoldChange",
+  "pvalue"
 )
 
-if (
-  is.finite(support_min) &&
-  is.finite(support_max) &&
-  support_max > support_min
-) {
-  network_targets$node_size <- 4 +
-    4 * (
-      network_targets$n_supportive - support_min
-    ) / (
-      support_max - support_min
+missing_target_cols <- setdiff(
+  required_target_cols,
+  colnames(jun_target_df)
+)
+
+if (length(missing_target_cols) > 0) {
+  stop(
+    "DE_TABLE is missing columns required for the decoupleR-style target plot: ",
+    paste(
+      missing_target_cols,
+      collapse = ", "
     )
-} else {
-  network_targets$node_size <- 6
+  )
 }
 
-p_targets <- ggplot2::ggplot() +
-  ggplot2::geom_segment(
-    data = edge_df,
-    ggplot2::aes(
-      x = x,
-      y = y,
-      xend = xend,
-      yend = yend,
-      color = regulation
+target_plot_df <- jun_target_df %>%
+  dplyr::filter(
+    celltype == jun_best_celltype,
+    is.finite(log2FoldChange),
+    is.finite(stat),
+    is.finite(mor),
+    is.finite(pvalue)
+  ) %>%
+  dplyr::mutate(
+    p_plot = pmax(
+      pvalue,
+      .Machine$double.xmin
     ),
-    linewidth = 1.05,
-    alpha = 0.95,
-    arrow = grid::arrow(
-      type = "closed",
-      length = grid::unit(
-        2.3,
-        "mm"
-      )
+    neglog10_p = -log10(p_plot),
+    mor_x_stat = mor * stat,
+    regulon_support = dplyr::case_when(
+      mor_x_stat > 0 ~ "Supports inferred JUN activity",
+      mor_x_stat < 0 ~ "Opposes inferred JUN activity",
+      TRUE ~ "Neutral"
+    ),
+    significant = !is.na(padj) & padj < 0.05,
+    abs_mor = abs(mor)
+  )
+
+target_label_df <- target_plot_df %>%
+  dplyr::filter(
+    significant
+  ) %>%
+  dplyr::arrange(
+    dplyr::desc(neglog10_p),
+    dplyr::desc(abs(mor_x_stat))
+  ) %>%
+  dplyr::slice_head(
+    n = TOP_JUN_TARGETS
+  )
+
+p_targets <- ggplot2::ggplot(
+  target_plot_df,
+  ggplot2::aes(
+    x = log2FoldChange,
+    y = neglog10_p
+  )
+) +
+  # Black underlay reproduces the target-level style used in the decoupleR
+  # vignette while keeping the MOR interpretation visible in the foreground.
+  ggplot2::geom_point(
+    ggplot2::aes(
+      size = abs_mor
+    ),
+    color = "black",
+    alpha = 0.90
+  ) +
+  ggplot2::geom_point(
+    ggplot2::aes(
+      color = regulon_support,
+      size = abs_mor,
+      alpha = significant
     )
   ) +
-  ggplot2::geom_point(
-    data = network_targets,
+  ggrepel::geom_label_repel(
+    data = target_label_df,
     ggplot2::aes(
-      x = x,
-      y = y,
-      fill = node_fill,
-      size = node_size
-    ),
-    shape = 21,
-    color = "black",
-    stroke = 0.35
-  ) +
-  ggplot2::geom_point(
-    ggplot2::aes(
-      x = 0,
-      y = 0
-    ),
-    shape = 21,
-    size = 10.5,
-    fill = "grey15",
-    color = "black",
-    stroke = 0.45
-  ) +
-  ggplot2::annotate(
-    "text",
-    x = 0,
-    y = 0,
-    label = TF_FOCUS,
-    color = "white",
-    fontface = "bold",
-    size = 3.5
-  ) +
-  ggplot2::geom_text(
-    data = network_targets,
-    ggplot2::aes(
-      x = label_x,
-      y = label_y,
-      label = paste0(
-        gene,
-        ifelse(
-          mor > 0,
-          "  (+)",
-          "  (-)"
-        )
-      ),
-      hjust = label_hjust
+      label = gene
     ),
     size = 2.8,
-    fontface = "bold"
+    label.size = 0.15,
+    box.padding = 0.20,
+    point.padding = 0.12,
+    max.overlaps = Inf,
+    seed = 1,
+    show.legend = FALSE
+  ) +
+  ggplot2::geom_vline(
+    xintercept = 0,
+    linetype = "dotted",
+    color = "grey45",
+    linewidth = 0.35
   ) +
   ggplot2::scale_color_manual(
     values = c(
-      "Activation" = "#B2182B",
-      "Repression" = "#2166AC"
+      "Supports inferred JUN activity" = "#B2182B",
+      "Opposes inferred JUN activity" = "#2166AC",
+      "Neutral" = "grey65"
     ),
-    labels = c(
-      "Activation" = "mor > 0  activation",
-      "Repression" = "mor < 0  repression"
-    ),
-    name = "CollecTRI mode of regulation"
+    name = "MOR x DESeq2 stat"
   ) +
-  ggplot2::scale_fill_gradient2(
-    low = "#2166AC",
-    mid = "white",
-    high = "#B2182B",
-    midpoint = 0,
-    limits = c(
-      -TARGET_DISPLAY_LIMIT,
-      TARGET_DISPLAY_LIMIT
+  ggplot2::scale_alpha_manual(
+    values = c(
+      "TRUE" = 0.95,
+      "FALSE" = 0.18
     ),
-    name = "Mean signed\ncontribution"
-  ) +
-  ggplot2::scale_size_identity(
     guide = "none"
   ) +
-  ggplot2::coord_equal(
-    xlim = c(
-      -1.42,
-      1.42
+  ggplot2::scale_size_continuous(
+    range = c(
+      1.6,
+      3.6
     ),
-    ylim = c(
-      -1.32,
-      1.32
-    ),
-    clip = "off"
+    name = "|CollecTRI MOR|"
   ) +
   ggplot2::labs(
+    x = "log2FC (DMD vs CTRL)",
+    y = "-log10(p-value)",
+    title = paste0(
+      "JUN target evidence - ",
+      jun_best_celltype
+    ),
     tag = "C"
   ) +
-  ggplot2::theme_void(
-    base_size = 8.2
+  ggplot2::theme_classic(
+    base_size = 8.5
   ) +
   ggplot2::theme(
     plot.tag = ggplot2::element_text(
       face = "bold",
       size = 15
     ),
-    plot.tag.position = c(0.01, 0.99),
-    legend.position = "right",
-    legend.title = ggplot2::element_text(
-      size = 7.2
+    plot.tag.position = c(
+      0.01,
+      0.99
     ),
-    legend.text = ggplot2::element_text(
+    plot.title = ggplot2::element_text(
+      size = 9.5,
+      face = "bold"
+    ),
+    axis.title = ggplot2::element_text(
+      size = 8.0
+    ),
+    axis.text = ggplot2::element_text(
       size = 7.0
     ),
+    legend.position = "right",
+    legend.title = ggplot2::element_text(
+      size = 7.0
+    ),
+    legend.text = ggplot2::element_text(
+      size = 6.5
+    ),
     legend.key.height = grid::unit(
-      0.30,
+      0.27,
       "cm"
     ),
     plot.margin = ggplot2::margin(
-      3, 22, 3, 18
+      3,
+      7,
+      3,
+      5
     )
   )
 
 message(
-  "JUN targets selected for Panel C: ",
-  paste(
-    top_jun_targets,
-    collapse = ", "
-  )
-)
-
-message(
-  "Panel C mor: ",
-  sum(network_targets$mor > 0, na.rm = TRUE),
-  " activating / ",
-  sum(network_targets$mor < 0, na.rm = TRUE),
-  " repressing JUN-target edges."
+  "Panel C uses decoupleR-style target evidence for JUN in ",
+  jun_best_celltype,
+  ": ",
+  nrow(target_plot_df),
+  " CollecTRI targets; ",
+  sum(target_plot_df$mor > 0, na.rm = TRUE),
+  " positive MOR / ",
+  sum(target_plot_df$mor < 0, na.rm = TRUE),
+  " negative MOR."
 )
 
 # ------------------------------------------------------------------------------
@@ -1107,8 +1061,8 @@ right_panel <- (
 ) +
   patchwork::plot_layout(
     heights = c(
-      1.05,
-      0.95
+      0.90,
+      1.25
     )
   )
 
@@ -1118,8 +1072,8 @@ final_plot <- (
 ) +
   patchwork::plot_layout(
     widths = c(
-      1.05,
-      1.45
+      0.95,
+      1.55
     )
   ) &
   ggplot2::theme(
