@@ -168,8 +168,13 @@ if (length(missing_meta) > 0) {
   )
 }
 
-if (!ASSAY %in% Assays(obj)) {
-  stop("Assay '", ASSAY, "' not found in the Seurat object.")
+assay_names <- names(obj@assays)
+
+if (!ASSAY %in% assay_names) {
+  stop(
+    "Assay '", ASSAY, "' not found in the Seurat object. Available assays: ",
+    paste(assay_names, collapse = ", ")
+  )
 }
 
 DefaultAssay(obj) <- ASSAY
