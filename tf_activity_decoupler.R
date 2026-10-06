@@ -135,6 +135,9 @@ MIN_REGULON_SIZE <- 10
 # Number of TFs displayed in the summary heatmap
 TOP_TF_HEATMAP <- 30
 
+# Number of strongest TF activities displayed per cell type
+TOP_TF_BARPLOT <- 10
+
 OUTDIR <- "results_tf_activity"
 
 # ==============================================================================
@@ -887,6 +890,9 @@ p <- ggplot2::ggplot(
 ) +
   ggplot2::geom_tile() +
   ggplot2::scale_fill_gradient2(
+    low = "#2166AC",
+    mid = "white",
+    high = "#B2182B",
     midpoint = 0,
     name = "TF activity\nULM score"
   ) +
@@ -937,7 +943,120 @@ ggplot2::ggsave(
 )
 
 # ==============================================================================
-# 9. SESSION INFO
+# 9. TOP 10 TF BARPLOTS PER CELL TYPE
+# ==============================================================================
+
+for (ct in unique(tf_all$celltype)) {
+
+  top_ct <- tf_all %>%
+    dplyr::filter(
+      celltype == ct,
+      is.finite(estimate)
+    ) %>%
+    dplyr::arrange(
+      dplyr::desc(abs(estimate))
+    ) %>%
+    dplyr::slice_head(
+      n = TOP_TF_BARPLOT
+    ) %>%
+    dplyr::arrange(estimate) %>%
+    dplyr::mutate(
+      source = factor(
+        source,
+        levels = source
+      ),
+      direction = ifelse(
+        estimate >= 0,
+        "Higher in DMD",
+        "Lower in DMD"
+      )
+    )
+
+  if (nrow(top_ct) == 0) {
+    next
+  }
+
+  p_bar <- ggplot2::ggplot(
+    top_ct,
+    ggplot2::aes(
+      x = source,
+      y = estimate,
+      fill = estimate
+    )
+  ) +
+    ggplot2::geom_col(
+      width = 0.75
+    ) +
+    ggplot2::coord_flip() +
+    ggplot2::scale_fill_gradient2(
+      low = "#2166AC",
+      mid = "white",
+      high = "#B2182B",
+      midpoint = 0,
+      name = "ULM score"
+    ) +
+    ggplot2::geom_hline(
+      yintercept = 0,
+      linewidth = 0.4
+    ) +
+    ggplot2::labs(
+      x = NULL,
+      y = "TF activity (ULM score)",
+      title = paste0("Top ", TOP_TF_BARPLOT, " TF activities - ", ct),
+      subtitle = "DMD vs CTRL | CollecTRI + decoupleR ULM"
+    ) +
+    ggplot2::theme_minimal(
+      base_size = 11
+    ) +
+    ggplot2::theme(
+      panel.grid.major.y = ggplot2::element_blank(),
+      panel.grid.minor = ggplot2::element_blank()
+    )
+
+  safe_ct <- gsub(
+    "[^A-Za-z0-9._-]+",
+    "_",
+    ct
+  )
+
+  ggplot2::ggsave(
+    file.path(
+      OUTDIR,
+      "figures",
+      paste0(
+        "TF_activity_top",
+        TOP_TF_BARPLOT,
+        "_",
+        safe_ct,
+        ".pdf"
+      )
+    ),
+    p_bar,
+    width = 7,
+    height = 5
+  )
+
+  ggplot2::ggsave(
+    file.path(
+      OUTDIR,
+      "figures",
+      paste0(
+        "TF_activity_top",
+        TOP_TF_BARPLOT,
+        "_",
+        safe_ct,
+        ".png"
+      )
+    ),
+    p_bar,
+    width = 7,
+    height = 5,
+    dpi = 300
+  )
+}
+
+# ==============================================================================
+# 10. SESSION INFO
 # ==============================================================================
 
 writeLines(
