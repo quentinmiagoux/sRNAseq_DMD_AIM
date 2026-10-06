@@ -1352,6 +1352,7 @@ make_jun_lollipop <- function(
 ```
 
 
+```{r mor-helper}
 make_jun_mor_consistency <- function(
   jun_target_df,
   celltype_focus,
@@ -1498,6 +1499,7 @@ make_jun_mor_consistency <- function(
       )
     )
 }
+```
 
 # Load data
 
