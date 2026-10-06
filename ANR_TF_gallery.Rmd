@@ -2559,31 +2559,123 @@ Recommended ANR layout: cell populations, donor-aware TF activity, then a
 compact mechanistic view of JUN targets using CollecTRI MOR.
 
 ```{r combo4}
-right_combo4 <- (
-  p_b1 /
-    p_c7
-) +
-  patchwork::plot_layout(
-    heights = c(
-      0.80,
-      1.20
+p_a_combo4 <- p_a +
+  ggplot2::theme(
+    legend.text = ggplot2::element_text(
+      size = 9.5
+    ),
+    legend.key.height = grid::unit(
+      0.35,
+      "cm"
+    ),
+    legend.key.width = grid::unit(
+      0.35,
+      "cm"
     )
   )
 
-combo4 <- p_a +
+p_b1_combo4 <- p_b1 +
+  ggplot2::theme(
+    plot.tag = ggplot2::element_text(
+      face = "bold",
+      size = 21
+    ),
+    axis.text.y = ggplot2::element_text(
+      face = "bold",
+      size = 9.5
+    ),
+    axis.text.x = ggplot2::element_text(
+      angle = 35,
+      hjust = 1,
+      size = 9.5
+    ),
+    legend.title = ggplot2::element_text(
+      size = 10
+    ),
+    legend.text = ggplot2::element_text(
+      size = 9
+    ),
+    plot.margin = ggplot2::margin(
+      4,
+      4,
+      2,
+      4
+    )
+  )
+
+p_c7_combo4 <- make_jun_mor_consistency(
+  jun_target_df = jun_target_df,
+  celltype_focus = jun_best_celltype,
+  top_n = 8,
+  tag = "C"
+) +
+  ggplot2::ggtitle(
+    paste0(
+      "JUN targets — ",
+      jun_best_celltype
+    )
+  ) +
+  ggplot2::labs(
+    x = "DESeq2 Wald × CollecTRI MOR",
+    subtitle = NULL
+  ) +
+  ggplot2::theme(
+    plot.tag = ggplot2::element_text(
+      face = "bold",
+      size = 21
+    ),
+    plot.title = ggplot2::element_text(
+      size = 14
+    ),
+    axis.text.y = ggplot2::element_text(
+      face = "bold",
+      size = 9.5
+    ),
+    axis.text.x = ggplot2::element_text(
+      size = 9.5
+    ),
+    axis.title.x = ggplot2::element_text(
+      size = 10.5
+    ),
+    legend.title = ggplot2::element_text(
+      size = 9.5
+    ),
+    legend.text = ggplot2::element_text(
+      size = 8.5
+    ),
+    plot.margin = ggplot2::margin(
+      2,
+      4,
+      4,
+      4
+    )
+  )
+
+right_combo4 <- (
+  p_b1_combo4 /
+    p_c7_combo4
+) +
+  patchwork::plot_layout(
+    heights = c(
+      1.05,
+      0.95
+    )
+  )
+
+combo4 <- p_a_combo4 +
   right_combo4 +
   patchwork::plot_layout(
     widths = c(
-      1.08,
-      1.42
+      0.95,
+      1.55
     )
   )
 
 save_plot(
   combo4,
   "candidate_figure_AB1C7_MOR",
-  width = 15,
-  height = 9
+  width = 16,
+  height = 10
 )
 
 combo4
