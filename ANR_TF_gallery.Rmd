@@ -30,6 +30,7 @@ cran_pkgs <- c(
   "ggplot2",
   "patchwork",
   "ggrepel",
+  "RColorBrewer",
   "tibble",
   "tidyr",
   "rmarkdown",
