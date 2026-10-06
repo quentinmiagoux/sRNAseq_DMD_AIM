@@ -1,0 +1,1750 @@
+---
+title: "ANR preliminary TF activity gallery"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    code_folding: hide
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 10,
+  fig.height = 6,
+  dpi = 150
+)
+```
+
+# Packages
+
+```{r packages}
+INSTALL_MISSING <- TRUE
+
+cran_pkgs <- c(
+  "Seurat",
+  "dplyr",
+  "ggplot2",
+  "patchwork",
+  "ggrepel",
+  "tibble",
+  "tidyr",
+  "rmarkdown"
+)
+
+missing_cran <- cran_pkgs[
+  !vapply(
+    cran_pkgs,
+    requireNamespace,
+    logical(1),
+    quietly = TRUE
+  )
+]
+
+if (length(missing_cran) > 0) {
+  if (!INSTALL_MISSING) {
+    stop(
+      "Missing packages: ",
+      paste(missing_cran, collapse = ", ")
+    )
+  }
+
+  install.packages(
+    missing_cran,
+    repos = "https://cloud.r-project.org"
+  )
+}
+
+suppressPackageStartupMessages({
+  library(Seurat)
+  library(dplyr)
+  library(ggplot2)
+  library(patchwork)
+  library(ggrepel)
+  library(tibble)
+  library(tidyr)
+})
+```
+
+# Configuration
+
+```{r config}
+SEURAT_RDS <- file.path(
+  "data",
+  "Integration_paravertebral_final.rds"
+)
+
+TF_TABLE <- file.path(
+  "results_tf_activity",
+  "TF_activity",
+  "all_celltypes_CollecTRI_ULM.tsv"
+)
+
+DE_TABLE <- file.path(
+  "results_tf_activity",
+  "DESeq2",
+  "all_celltypes_DMD_vs_CTRL.tsv"
+)
+
+CURRENT_FIG_PNG <- file.path(
+  "results_tf_activity",
+  "figures",
+  "ANR_preliminary_snRNAseq_TF_activity.png"
+)
+
+OUTDIR <- file.path(
+  "results_tf_activity",
+  "figures",
+  "anr_gallery"
+)
+
+dir.create(
+  OUTDIR,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+TF_FOCUS <- "JUN"
+TOP_N_TF <- 10
+TOP_JUN_TARGETS <- 15
+ACTIVITY_LIMIT <- 4
+
+CELLTYPE_COL <- "cell_type"
+CONDITION_COL <- "condition"
+
+CELLTYPE_ORDER_REFERENCE <- c(
+  "Myofibers",
+  "Regenerating Myofibers",
+  "Satellite cells",
+  "FAPs",
+  "Immune cells",
+  "Endothelial",
+  "Smooth muscle",
+  "Tenocytes",
+  "Schwann cells",
+  "Neural cells",
+  "Adipocytes"
+)
+
+CELLTYPE_COLORS <- c(
+  "Adipocytes" = "#E8B92E",
+  "Endothelial" = "#6BAFB0",
+  "FAPs" = "#4E79A7",
+  "Immune cells" = "#F28E2B",
+  "Myofibers" = "#D95F4E",
+  "Neural cells" = "#7BC96F",
+  "Regenerating Myofibers" = "#F08A84",
+  "Satellite cells" = "#59A14F",
+  "Schwann cells" = "#B07AA1",
+  "Smooth muscle" = "#A96F9C",
+  "Tenocytes" = "#9C755F"
+)
+```
+
+# Helpers
+
+```{r helpers}
+save_plot <- function(
+  plot,
+  filename,
+  width = 9,
+  height = 6
+) {
+
+  png_path <- file.path(
+    OUTDIR,
+    paste0(
+      filename,
+      ".png"
+    )
+  )
+
+  pdf_path <- file.path(
+    OUTDIR,
+    paste0(
+      filename,
+      ".pdf"
+    )
+  )
+
+  ggplot2::ggsave(
+    filename = png_path,
+    plot = plot,
+    width = width,
+    height = height,
+    dpi = 300,
+    bg = "white"
+  )
+
+  ggplot2::ggsave(
+    filename = pdf_path,
+    plot = plot,
+    width = width,
+    height = height,
+    bg = "white"
+  )
+
+  invisible(
+    c(
+      png = png_path,
+      pdf = pdf_path
+    )
+  )
+}
+
+
+load_collectri_static <- function(
+  cache_dir = OUTDIR
+) {
+
+  collectri_url <- "https://rescued.omnipathdb.org/CollecTRI.csv"
+
+  collectri_cache <- file.path(
+    cache_dir,
+    "CollecTRI_human.csv"
+  )
+
+  if (!file.exists(collectri_cache)) {
+
+    message(
+      "Downloading CollecTRI static network..."
+    )
+
+    utils::download.file(
+      url = collectri_url,
+      destfile = collectri_cache,
+      mode = "wb",
+      quiet = FALSE
+    )
+  }
+
+  raw <- utils::read.csv(
+    collectri_cache,
+    stringsAsFactors = FALSE,
+    check.names = FALSE
+  )
+
+  required_cols <- c(
+    "source",
+    "target",
+    "weight"
+  )
+
+  missing_cols <- setdiff(
+    required_cols,
+    colnames(raw)
+  )
+
+  if (length(missing_cols) > 0) {
+    stop(
+      "Unexpected CollecTRI format. Missing columns: ",
+      paste(
+        missing_cols,
+        collapse = ", "
+      )
+    )
+  }
+
+  raw %>%
+    dplyr::transmute(
+      source = as.character(source),
+      target = as.character(target),
+      mor = as.numeric(weight)
+    ) %>%
+    dplyr::filter(
+      !is.na(source),
+      !is.na(target),
+      is.finite(mor),
+      source != "",
+      target != ""
+    ) %>%
+    dplyr::distinct(
+      source,
+      target,
+      .keep_all = TRUE
+    )
+}
+
+
+row_zscore <- function(x) {
+
+  if (all(is.na(x))) {
+    return(
+      rep(
+        NA_real_,
+        length(x)
+      )
+    )
+  }
+
+  s <- stats::sd(
+    x,
+    na.rm = TRUE
+  )
+
+  m <- mean(
+    x,
+    na.rm = TRUE
+  )
+
+  if (
+    !is.finite(s) ||
+    s == 0
+  ) {
+    return(
+      rep(
+        0,
+        length(x)
+      )
+    )
+  }
+
+  (x - m) / s
+}
+
+
+sig_stars <- function(p) {
+
+  dplyr::case_when(
+    is.na(p) ~ "",
+    p < 0.001 ~ "***",
+    p < 0.01 ~ "**",
+    p < 0.05 ~ "*",
+    TRUE ~ ""
+  )
+}
+
+
+select_stratified_tfs <- function(
+  tf_all,
+  tf_focus = "JUN",
+  top_n = 10,
+  celltype_order
+) {
+
+  pair_rank <- tf_all %>%
+    dplyr::filter(
+      is.finite(estimate),
+      !is.na(padj),
+      padj < 0.05
+    ) %>%
+    dplyr::mutate(
+      abs_activity = abs(estimate),
+      celltype = as.character(celltype),
+      source = as.character(source)
+    ) %>%
+    dplyr::group_by(celltype) %>%
+    dplyr::arrange(
+      padj,
+      dplyr::desc(abs_activity),
+      .by_group = TRUE
+    ) %>%
+    dplyr::mutate(
+      cell_rank = dplyr::row_number()
+    ) %>%
+    dplyr::ungroup()
+
+  focus_row <- pair_rank %>%
+    dplyr::filter(
+      source == tf_focus
+    ) %>%
+    dplyr::arrange(
+      padj,
+      dplyr::desc(abs_activity)
+    ) %>%
+    dplyr::slice_head(
+      n = 1
+    )
+
+  if (nrow(focus_row) == 0) {
+
+    focus_row <- tf_all %>%
+      dplyr::filter(
+        source == tf_focus,
+        is.finite(estimate)
+      ) %>%
+      dplyr::mutate(
+        abs_activity = abs(estimate),
+        cell_rank = NA_integer_
+      ) %>%
+      dplyr::arrange(
+        dplyr::desc(abs_activity)
+      ) %>%
+      dplyr::slice_head(
+        n = 1
+      )
+  }
+
+  if (nrow(focus_row) == 0) {
+    stop(
+      "Focus TF not found: ",
+      tf_focus
+    )
+  }
+
+  selected_rows <- focus_row
+
+  selected_tfs <- unique(
+    as.character(
+      selected_rows$source
+    )
+  )
+
+  covered_celltypes <- unique(
+    as.character(
+      selected_rows$celltype
+    )
+  )
+
+  for (ct in celltype_order) {
+
+    if (length(selected_tfs) >= top_n) {
+      break
+    }
+
+    if (ct %in% covered_celltypes) {
+      next
+    }
+
+    candidate <- pair_rank %>%
+      dplyr::filter(
+        celltype == ct,
+        !source %in% selected_tfs
+      ) %>%
+      dplyr::slice_head(
+        n = 1
+      )
+
+    if (nrow(candidate) == 0) {
+      next
+    }
+
+    selected_rows <- dplyr::bind_rows(
+      selected_rows,
+      candidate
+    )
+
+    selected_tfs <- unique(
+      c(
+        selected_tfs,
+        as.character(
+          candidate$source
+        )
+      )
+    )
+
+    covered_celltypes <- unique(
+      c(
+        covered_celltypes,
+        ct
+      )
+    )
+  }
+
+  if (length(selected_tfs) < top_n) {
+
+    filler <- pair_rank %>%
+      dplyr::filter(
+        !source %in% selected_tfs
+      ) %>%
+      dplyr::arrange(
+        cell_rank,
+        padj,
+        dplyr::desc(abs_activity)
+      ) %>%
+      dplyr::distinct(
+        source,
+        .keep_all = TRUE
+      ) %>%
+      dplyr::slice_head(
+        n = top_n - length(selected_tfs)
+      )
+
+    selected_rows <- dplyr::bind_rows(
+      selected_rows,
+      filler
+    )
+  }
+
+  selected_rows %>%
+    dplyr::distinct(
+      source,
+      .keep_all = TRUE
+    ) %>%
+    dplyr::slice_head(
+      n = top_n
+    )
+}
+
+
+select_jun_targets <- function(
+  de_all,
+  focus_net,
+  top_n = 15,
+  celltype_order = NULL
+) {
+
+  jun_target_df <- de_all %>%
+    dplyr::inner_join(
+      focus_net,
+      by = c(
+        "gene" = "target"
+      )
+    ) %>%
+    dplyr::filter(
+      is.finite(stat),
+      is.finite(mor)
+    ) %>%
+    dplyr::mutate(
+      contribution = stat * mor,
+      significant = !is.na(padj) & padj < 0.05,
+      supportive = significant & contribution > 0
+    )
+
+  if (!is.null(celltype_order)) {
+
+    jun_target_df <- jun_target_df %>%
+      dplyr::filter(
+        celltype %in% celltype_order
+      )
+  }
+
+  target_rank <- jun_target_df %>%
+    dplyr::group_by(gene) %>%
+    dplyr::summarise(
+      n_supportive = sum(
+        supportive,
+        na.rm = TRUE
+      ),
+      n_significant = sum(
+        significant,
+        na.rm = TRUE
+      ),
+      n_celltypes = dplyr::n_distinct(
+        celltype[
+          significant
+        ]
+      ),
+      max_abs_contribution = max(
+        abs(contribution),
+        na.rm = TRUE
+      ),
+      mean_contribution = mean(
+        contribution,
+        na.rm = TRUE
+      ),
+      .groups = "drop"
+    ) %>%
+    dplyr::filter(
+      n_supportive > 0
+    ) %>%
+    dplyr::arrange(
+      dplyr::desc(n_supportive),
+      dplyr::desc(n_celltypes),
+      dplyr::desc(n_significant),
+      dplyr::desc(max_abs_contribution),
+      dplyr::desc(mean_contribution)
+    )
+
+  top_targets <- target_rank %>%
+    dplyr::slice_head(
+      n = top_n
+    )
+
+  list(
+    jun_target_df = jun_target_df,
+    target_rank = target_rank,
+    top_targets = top_targets
+  )
+}
+
+
+make_umap <- function(
+  seu,
+  reduction_name,
+  celltype_col,
+  celltype_order
+) {
+
+  emb <- as.data.frame(
+    Seurat::Embeddings(
+      seu,
+      reduction = reduction_name
+    )
+  )
+
+  colnames(emb)[1:2] <- c(
+    "UMAP_1",
+    "UMAP_2"
+  )
+
+  emb$celltype <- as.character(
+    seu@meta.data[[celltype_col]]
+  )
+
+  plot_df <- emb %>%
+    dplyr::filter(
+      !is.na(celltype),
+      celltype %in% celltype_order
+    ) %>%
+    dplyr::mutate(
+      celltype = factor(
+        celltype,
+        levels = celltype_order
+      )
+    )
+
+  ggplot2::ggplot(
+    plot_df,
+    ggplot2::aes(
+      x = UMAP_1,
+      y = UMAP_2,
+      color = celltype
+    )
+  ) +
+    ggplot2::geom_point(
+      size = 0.16,
+      alpha = 0.72,
+      stroke = 0
+    ) +
+    ggplot2::scale_color_manual(
+      values = CELLTYPE_COLORS,
+      drop = FALSE,
+      guide = ggplot2::guide_legend(
+        override.aes = list(
+          size = 4,
+          alpha = 1
+        )
+      ),
+      name = NULL
+    ) +
+    ggplot2::coord_equal() +
+    ggplot2::labs(
+      x = "UMAP 1",
+      y = "UMAP 2",
+      tag = "A"
+    ) +
+    ggplot2::theme_classic(
+      base_size = 9
+    ) +
+    ggplot2::theme(
+      plot.tag = ggplot2::element_text(
+        face = "bold",
+        size = 18
+      ),
+      plot.tag.position = c(
+        0.01,
+        0.99
+      ),
+      legend.position = "right",
+      legend.text = ggplot2::element_text(
+        size = 8.5
+      ),
+      axis.text = ggplot2::element_blank(),
+      axis.ticks = ggplot2::element_blank(),
+      plot.margin = ggplot2::margin(
+        5,
+        5,
+        5,
+        5
+      )
+    )
+}
+
+
+make_B_heatmap_raw <- function(
+  tf_all,
+  tf_sel,
+  celltype_order,
+  tag = "B"
+) {
+
+  top_tfs <- as.character(
+    tf_sel$source
+  )
+
+  plot_df <- tf_all %>%
+    dplyr::filter(
+      source %in% top_tfs,
+      celltype %in% celltype_order
+    ) %>%
+    dplyr::mutate(
+      source = factor(
+        source,
+        levels = rev(top_tfs)
+      ),
+      celltype = factor(
+        celltype,
+        levels = celltype_order
+      ),
+      plot_estimate = pmax(
+        -ACTIVITY_LIMIT,
+        pmin(
+          ACTIVITY_LIMIT,
+          estimate
+        )
+      ),
+      stars = sig_stars(
+        padj
+      )
+    )
+
+  ggplot2::ggplot(
+    plot_df,
+    ggplot2::aes(
+      x = celltype,
+      y = source,
+      fill = plot_estimate
+    )
+  ) +
+    ggplot2::geom_tile(
+      color = "white",
+      linewidth = 0.5
+    ) +
+    ggplot2::geom_text(
+      ggplot2::aes(
+        label = stars
+      ),
+      size = 3.7,
+      fontface = "bold"
+    ) +
+    ggplot2::scale_fill_gradient2(
+      low = "#2166AC",
+      mid = "white",
+      high = "#B2182B",
+      midpoint = 0,
+      limits = c(
+        -ACTIVITY_LIMIT,
+        ACTIVITY_LIMIT
+      ),
+      name = "ULM score"
+    ) +
+    ggplot2::labs(
+      x = NULL,
+      y = NULL,
+      tag = tag
+    ) +
+    ggplot2::theme_minimal(
+      base_size = 9
+    ) +
+    ggplot2::theme(
+      plot.tag = ggplot2::element_text(
+        face = "bold",
+        size = 18
+      ),
+      plot.tag.position = c(
+        0.01,
+        0.99
+      ),
+      axis.text.x = ggplot2::element_text(
+        angle = 38,
+        hjust = 1
+      ),
+      axis.text.y = ggplot2::element_text(
+        face = "bold"
+      ),
+      panel.grid = ggplot2::element_blank(),
+      plot.margin = ggplot2::margin(
+        5,
+        5,
+        5,
+        5
+      )
+    )
+}
+
+
+make_B_heatmap_scaled <- function(
+  tf_all,
+  tf_sel,
+  celltype_order,
+  tag = "B"
+) {
+
+  top_tfs <- as.character(
+    tf_sel$source
+  )
+
+  plot_df <- tf_all %>%
+    dplyr::filter(
+      source %in% top_tfs,
+      celltype %in% celltype_order
+    ) %>%
+    dplyr::group_by(source) %>%
+    dplyr::mutate(
+      scaled_estimate = row_zscore(
+        estimate
+      )
+    ) %>%
+    dplyr::ungroup() %>%
+    dplyr::mutate(
+      source = factor(
+        source,
+        levels = rev(top_tfs)
+      ),
+      celltype = factor(
+        celltype,
+        levels = celltype_order
+      ),
+      stars = sig_stars(
+        padj
+      )
+    )
+
+  ggplot2::ggplot(
+    plot_df,
+    ggplot2::aes(
+      x = celltype,
+      y = source,
+      fill = scaled_estimate
+    )
+  ) +
+    ggplot2::geom_tile(
+      color = "white",
+      linewidth = 0.5
+    ) +
+    ggplot2::geom_text(
+      ggplot2::aes(
+        label = stars
+      ),
+      size = 3.7,
+      fontface = "bold"
+    ) +
+    ggplot2::scale_fill_gradient2(
+      low = "#2166AC",
+      mid = "white",
+      high = "#B2182B",
+      midpoint = 0,
+      limits = c(
+        -2.5,
+        2.5
+      ),
+      name = "Row-scaled
+ULM score"
+    ) +
+    ggplot2::labs(
+      x = NULL,
+      y = NULL,
+      tag = tag
+    ) +
+    ggplot2::theme_minimal(
+      base_size = 9
+    ) +
+    ggplot2::theme(
+      plot.tag = ggplot2::element_text(
+        face = "bold",
+        size = 18
+      ),
+      plot.tag.position = c(
+        0.01,
+        0.99
+      ),
+      axis.text.x = ggplot2::element_text(
+        angle = 38,
+        hjust = 1
+      ),
+      axis.text.y = ggplot2::element_text(
+        face = "bold"
+      ),
+      panel.grid = ggplot2::element_blank(),
+      plot.margin = ggplot2::margin(
+        5,
+        5,
+        5,
+        5
+      )
+    )
+}
+
+
+make_B_dotplot <- function(
+  tf_all,
+  tf_sel,
+  celltype_order,
+  tag = "B"
+) {
+
+  top_tfs <- as.character(
+    tf_sel$source
+  )
+
+  plot_df <- tf_all %>%
+    dplyr::filter(
+      source %in% top_tfs,
+      celltype %in% celltype_order
+    ) %>%
+    dplyr::mutate(
+      source = factor(
+        source,
+        levels = rev(top_tfs)
+      ),
+      celltype = factor(
+        celltype,
+        levels = celltype_order
+      ),
+      neglog10_padj = dplyr::if_else(
+        is.na(padj),
+        0,
+        pmin(
+          10,
+          -log10(
+            padj + 1e-300
+          )
+        )
+      ),
+      plot_estimate = pmax(
+        -ACTIVITY_LIMIT,
+        pmin(
+          ACTIVITY_LIMIT,
+          estimate
+        )
+      )
+    )
+
+  ggplot2::ggplot(
+    plot_df,
+    ggplot2::aes(
+      x = celltype,
+      y = source
+    )
+  ) +
+    ggplot2::geom_point(
+      ggplot2::aes(
+        size = neglog10_padj,
+        color = plot_estimate
+      ),
+      alpha = 0.95
+    ) +
+    ggplot2::scale_color_gradient2(
+      low = "#2166AC",
+      mid = "white",
+      high = "#B2182B",
+      midpoint = 0,
+      limits = c(
+        -ACTIVITY_LIMIT,
+        ACTIVITY_LIMIT
+      ),
+      name = "ULM score"
+    ) +
+    ggplot2::scale_size_continuous(
+      name = "-log10(padj)",
+      range = c(
+        1,
+        8
+      )
+    ) +
+    ggplot2::labs(
+      x = NULL,
+      y = NULL,
+      tag = tag
+    ) +
+    ggplot2::theme_minimal(
+      base_size = 9
+    ) +
+    ggplot2::theme(
+      plot.tag = ggplot2::element_text(
+        face = "bold",
+        size = 18
+      ),
+      plot.tag.position = c(
+        0.01,
+        0.99
+      ),
+      axis.text.x = ggplot2::element_text(
+        angle = 38,
+        hjust = 1
+      ),
+      axis.text.y = ggplot2::element_text(
+        face = "bold"
+      ),
+      panel.grid.minor = ggplot2::element_blank(),
+      plot.margin = ggplot2::margin(
+        5,
+        5,
+        5,
+        5
+      )
+    )
+}
+
+
+make_source_targets_plot <- function(
+  jun_target_df,
+  celltypes_use,
+  top_label_n = 12,
+  facet = TRUE,
+  tag = "C"
+) {
+
+  plot_df <- jun_target_df %>%
+    dplyr::filter(
+      celltype %in% celltypes_use
+    ) %>%
+    dplyr::group_by(celltype) %>%
+    dplyr::arrange(
+      gene,
+      .by_group = TRUE
+    ) %>%
+    dplyr::mutate(
+      jitter_index = dplyr::row_number(),
+      x_jitter = mor +
+        (
+          (
+            jitter_index %% 9
+          ) - 4
+        ) * 0.025,
+      sig = !is.na(padj) & padj < 0.05
+    ) %>%
+    dplyr::ungroup()
+
+  label_df <- plot_df %>%
+    dplyr::group_by(celltype) %>%
+    dplyr::arrange(
+      dplyr::desc(
+        abs(contribution)
+      ),
+      .by_group = TRUE
+    ) %>%
+    dplyr::slice_head(
+      n = top_label_n
+    ) %>%
+    dplyr::ungroup()
+
+  p <- ggplot2::ggplot(
+    plot_df,
+    ggplot2::aes(
+      x = x_jitter,
+      y = stat
+    )
+  ) +
+    ggplot2::geom_vline(
+      xintercept = 0,
+      linetype = "dashed",
+      color = "grey55",
+      linewidth = 0.35
+    ) +
+    ggplot2::geom_hline(
+      yintercept = 0,
+      linetype = "dashed",
+      color = "grey55",
+      linewidth = 0.35
+    ) +
+    ggplot2::geom_point(
+      ggplot2::aes(
+        fill = contribution,
+        alpha = sig
+      ),
+      shape = 21,
+      size = 2.6,
+      color = "black",
+      stroke = 0.2
+    ) +
+    ggrepel::geom_text_repel(
+      data = label_df,
+      ggplot2::aes(
+        label = gene
+      ),
+      size = 2.7,
+      box.padding = 0.25,
+      point.padding = 0.15,
+      max.overlaps = Inf,
+      seed = 1
+    ) +
+    ggplot2::scale_fill_gradient2(
+      low = "#2166AC",
+      mid = "white",
+      high = "#B2182B",
+      midpoint = 0,
+      name = "stat × mor"
+    ) +
+    ggplot2::scale_alpha_manual(
+      values = c(
+        "TRUE" = 0.95,
+        "FALSE" = 0.25
+      ),
+      guide = "none"
+    ) +
+    ggplot2::scale_x_continuous(
+      breaks = c(
+        -1,
+        1
+      ),
+      labels = c(
+        "mor < 0
+repression",
+        "mor > 0
+activation"
+      )
+    ) +
+    ggplot2::labs(
+      x = "CollecTRI mode of regulation",
+      y = "DESeq2 Wald statistic",
+      tag = tag
+    ) +
+    ggplot2::theme_classic(
+      base_size = 9
+    ) +
+    ggplot2::theme(
+      plot.tag = ggplot2::element_text(
+        face = "bold",
+        size = 18
+      ),
+      plot.tag.position = c(
+        0.01,
+        0.99
+      ),
+      plot.margin = ggplot2::margin(
+        5,
+        5,
+        5,
+        5
+      )
+    )
+
+  if (facet) {
+    p <- p +
+      ggplot2::facet_wrap(
+        ~ celltype,
+        scales = "free_y"
+      )
+  }
+
+  p
+}
+
+
+make_jun_lollipop <- function(
+  jun_target_df,
+  celltype_focus,
+  top_n = 15,
+  tag = "C"
+) {
+
+  plot_df <- jun_target_df %>%
+    dplyr::filter(
+      celltype == celltype_focus
+    ) %>%
+    dplyr::arrange(
+      dplyr::desc(
+        abs(contribution)
+      )
+    ) %>%
+    dplyr::slice_head(
+      n = top_n
+    ) %>%
+    dplyr::mutate(
+      gene = factor(
+        gene,
+        levels = rev(gene)
+      ),
+      regulation = dplyr::if_else(
+        mor > 0,
+        "Activation",
+        "Repression"
+      ),
+      significant = !is.na(padj) & padj < 0.05
+    )
+
+  ggplot2::ggplot(
+    plot_df,
+    ggplot2::aes(
+      x = contribution,
+      y = gene
+    )
+  ) +
+    ggplot2::geom_segment(
+      ggplot2::aes(
+        x = 0,
+        xend = contribution,
+        y = gene,
+        yend = gene
+      ),
+      linewidth = 0.6,
+      color = "grey60"
+    ) +
+    ggplot2::geom_point(
+      ggplot2::aes(
+        color = regulation,
+        shape = significant
+      ),
+      size = 3.4,
+      alpha = 0.95
+    ) +
+    ggplot2::scale_color_manual(
+      values = c(
+        "Activation" = "#B2182B",
+        "Repression" = "#2166AC"
+      ),
+      name = "CollecTRI mor"
+    ) +
+    ggplot2::scale_shape_manual(
+      values = c(
+        "TRUE" = 19,
+        "FALSE" = 1
+      ),
+      name = "DE padj < 0.05"
+    ) +
+    ggplot2::geom_vline(
+      xintercept = 0,
+      linetype = "dashed",
+      color = "grey50",
+      linewidth = 0.35
+    ) +
+    ggplot2::labs(
+      x = "Signed contribution (Wald stat × mor)",
+      y = NULL,
+      tag = tag
+    ) +
+    ggplot2::theme_classic(
+      base_size = 9
+    ) +
+    ggplot2::theme(
+      plot.tag = ggplot2::element_text(
+        face = "bold",
+        size = 18
+      ),
+      plot.tag.position = c(
+        0.01,
+        0.99
+      ),
+      axis.text.y = ggplot2::element_text(
+        face = "bold"
+      ),
+      plot.margin = ggplot2::margin(
+        5,
+        5,
+        5,
+        5
+      )
+    )
+}
+```
+
+# Load data
+
+```{r load-data}
+if (!file.exists(SEURAT_RDS)) {
+  stop(
+    "Missing Seurat file: ",
+    SEURAT_RDS
+  )
+}
+
+if (!file.exists(TF_TABLE)) {
+  stop(
+    "Missing TF table: ",
+    TF_TABLE
+  )
+}
+
+if (!file.exists(DE_TABLE)) {
+  stop(
+    "Missing DESeq2 table: ",
+    DE_TABLE
+  )
+}
+
+seu <- readRDS(
+  SEURAT_RDS
+)
+
+if (!inherits(seu, "Seurat")) {
+  stop(
+    "SEURAT_RDS does not contain a Seurat object."
+  )
+}
+
+if (!CELLTYPE_COL %in% colnames(seu@meta.data)) {
+  stop(
+    "Column ",
+    CELLTYPE_COL,
+    " not found in Seurat metadata."
+  )
+}
+
+tf_all <- read.delim(
+  TF_TABLE,
+  stringsAsFactors = FALSE,
+  check.names = FALSE
+) %>%
+  dplyr::mutate(
+    source = as.character(source),
+    celltype = as.character(celltype),
+    estimate = as.numeric(estimate),
+    padj = as.numeric(padj)
+  )
+
+de_all <- read.delim(
+  DE_TABLE,
+  stringsAsFactors = FALSE,
+  check.names = FALSE
+) %>%
+  dplyr::mutate(
+    celltype = as.character(celltype),
+    gene = as.character(gene),
+    stat = as.numeric(stat),
+    padj = as.numeric(padj)
+  )
+
+celltypes_present <- intersect(
+  CELLTYPE_ORDER_REFERENCE,
+  unique(tf_all$celltype)
+)
+
+celltypes_extra <- setdiff(
+  unique(tf_all$celltype),
+  celltypes_present
+)
+
+celltype_order <- c(
+  celltypes_present,
+  sort(celltypes_extra)
+)
+
+collectri <- load_collectri_static()
+
+focus_net <- collectri %>%
+  dplyr::filter(
+    source == TF_FOCUS
+  ) %>%
+  dplyr::select(
+    target,
+    mor
+  )
+
+if (nrow(focus_net) == 0) {
+  stop(
+    "No targets found for ",
+    TF_FOCUS,
+    " in CollecTRI."
+  )
+}
+
+tf_sel <- select_stratified_tfs(
+  tf_all = tf_all,
+  tf_focus = TF_FOCUS,
+  top_n = TOP_N_TF,
+  celltype_order = celltype_order
+)
+
+jun_info <- select_jun_targets(
+  de_all = de_all,
+  focus_net = focus_net,
+  top_n = TOP_JUN_TARGETS,
+  celltype_order = celltype_order
+)
+
+jun_target_df <- jun_info$jun_target_df
+jun_target_rank <- jun_info$target_rank
+top_jun_targets <- jun_info$top_targets
+
+preferred_reductions <- c(
+  "umap.rpca",
+  "umap",
+  "wnn.umap",
+  "umap.unintegrated"
+)
+
+reduction_name <- preferred_reductions[
+  preferred_reductions %in%
+    names(
+      seu@reductions
+    )
+][1]
+
+if (
+  length(reduction_name) == 0 ||
+  is.na(reduction_name)
+) {
+  stop(
+    "No compatible UMAP reduction found. Available: ",
+    paste(
+      names(
+        seu@reductions
+      ),
+      collapse = ", "
+    )
+  )
+}
+
+jun_tf_table <- tf_all %>%
+  dplyr::filter(
+    source == TF_FOCUS,
+    celltype %in% celltype_order
+  ) %>%
+  dplyr::arrange(
+    padj,
+    dplyr::desc(
+      abs(estimate)
+    )
+  )
+
+jun_best_celltype <- jun_tf_table %>%
+  dplyr::slice_head(
+    n = 1
+  ) %>%
+  dplyr::pull(
+    celltype
+  )
+
+jun_top_celltypes <- jun_tf_table %>%
+  dplyr::slice_head(
+    n = min(
+      3,
+      nrow(jun_tf_table)
+    )
+  ) %>%
+  dplyr::pull(
+    celltype
+  )
+
+selection_table <- tf_sel %>%
+  dplyr::select(
+    source,
+    representative_celltype = celltype,
+    estimate,
+    padj
+  )
+
+write.table(
+  selection_table,
+  file.path(
+    OUTDIR,
+    "selected_top10_tfs.tsv"
+  ),
+  sep = "\t",
+  quote = FALSE,
+  row.names = FALSE
+)
+
+write.table(
+  top_jun_targets,
+  file.path(
+    OUTDIR,
+    "selected_jun_targets.tsv"
+  ),
+  sep = "\t",
+  quote = FALSE,
+  row.names = FALSE
+)
+```
+
+# Existing representation
+
+```{r existing-figure, results='asis'}
+if (file.exists(CURRENT_FIG_PNG)) {
+
+  cat(
+    "### Current ANR figure\n\n"
+  )
+
+  print(
+    knitr::include_graphics(
+      CURRENT_FIG_PNG
+    )
+  )
+
+} else {
+
+  cat(
+    "Current combined figure not found at: ",
+    CURRENT_FIG_PNG,
+    "\n"
+  )
+}
+```
+
+# Panel A
+
+```{r panel-a}
+p_a <- make_umap(
+  seu = seu,
+  reduction_name = reduction_name,
+  celltype_col = CELLTYPE_COL,
+  celltype_order = celltype_order
+)
+
+save_plot(
+  p_a,
+  "panel_A_umap",
+  width = 8,
+  height = 6
+)
+
+p_a
+```
+
+# Alternative panel B representations {.tabset}
+
+## B1 - Raw ULM heatmap
+
+Closest to the current ANR representation. ULM scores retain their original
+DMD-vs-CTRL sign and magnitude.
+
+```{r b1}
+p_b1 <- make_B_heatmap_raw(
+  tf_all = tf_all,
+  tf_sel = tf_sel,
+  celltype_order = celltype_order,
+  tag = "B"
+)
+
+save_plot(
+  p_b1,
+  "panel_B1_raw_heatmap",
+  width = 10,
+  height = 4.8
+)
+
+p_b1
+```
+
+## B2 - Row-scaled matrixplot-like heatmap
+
+Inspired by matrix-style single-cell activity summaries. This emphasizes
+relative cell-type specificity within each TF, rather than absolute ULM
+magnitude.
+
+```{r b2}
+p_b2 <- make_B_heatmap_scaled(
+  tf_all = tf_all,
+  tf_sel = tf_sel,
+  celltype_order = celltype_order,
+  tag = "B"
+)
+
+save_plot(
+  p_b2,
+  "panel_B2_scaled_heatmap",
+  width = 10,
+  height = 4.8
+)
+
+p_b2
+```
+
+## B3 - Dotplot
+
+Color encodes signed ULM activity and point size encodes adjusted significance.
+
+```{r b3}
+p_b3 <- make_B_dotplot(
+  tf_all = tf_all,
+  tf_sel = tf_sel,
+  celltype_order = celltype_order,
+  tag = "B"
+)
+
+save_plot(
+  p_b3,
+  "panel_B3_dotplot",
+  width = 10,
+  height = 4.8
+)
+
+p_b3
+```
+
+# Alternative panel C representations for JUN {.tabset}
+
+## C1 - Source-target view: best JUN cell type
+
+This follows the source-target logic used by decoupler: CollecTRI mode of
+regulation on the x-axis and the signed DESeq2 Wald statistic on the y-axis.
+
+```{r c1}
+p_c1 <- make_source_targets_plot(
+  jun_target_df = jun_target_df %>%
+    dplyr::filter(
+      gene %in%
+        top_jun_targets$gene
+    ),
+  celltypes_use = jun_best_celltype,
+  top_label_n = 12,
+  facet = FALSE,
+  tag = "C"
+) +
+  ggplot2::ggtitle(
+    paste0(
+      "JUN source-target view: ",
+      jun_best_celltype
+    )
+  )
+
+save_plot(
+  p_c1,
+  "panel_C1_source_targets_best_celltype",
+  width = 7.5,
+  height = 5.5
+)
+
+p_c1
+```
+
+## C2 - Source-target view: top three JUN cell types
+
+Same representation, faceted over the three cell populations with the strongest
+JUN evidence.
+
+```{r c2}
+p_c2 <- make_source_targets_plot(
+  jun_target_df = jun_target_df %>%
+    dplyr::filter(
+      gene %in%
+        top_jun_targets$gene
+    ),
+  celltypes_use = jun_top_celltypes,
+  top_label_n = 8,
+  facet = TRUE,
+  tag = "C"
+) +
+  ggplot2::ggtitle(
+    "JUN source-target view across top cell populations"
+  )
+
+save_plot(
+  p_c2,
+  "panel_C2_source_targets_top3_celltypes",
+  width = 11,
+  height = 6.5
+)
+
+p_c2
+```
+
+## C3 - Leading JUN targets
+
+A compact lollipop view of the strongest target-level contributions in the
+cell type with the strongest JUN evidence.
+
+```{r c3}
+p_c3 <- make_jun_lollipop(
+  jun_target_df = jun_target_df,
+  celltype_focus = jun_best_celltype,
+  top_n = 15,
+  tag = "C"
+) +
+  ggplot2::ggtitle(
+    paste0(
+      "Top JUN targets in ",
+      jun_best_celltype
+    )
+  )
+
+save_plot(
+  p_c3,
+  "panel_C3_jun_lollipop_best_celltype",
+  width = 7.5,
+  height = 5.5
+)
+
+p_c3
+```
+
+# Candidate combined figures {.tabset}
+
+## Candidate 1 - A + raw heatmap + single source-target plot
+
+```{r combo1}
+combo1 <- p_a +
+  (
+    p_b1 /
+      p_c1
+  ) +
+  patchwork::plot_layout(
+    widths = c(
+      1.05,
+      1.35
+    )
+  )
+
+save_plot(
+  combo1,
+  "candidate_figure_AB1C1",
+  width = 15,
+  height = 8
+)
+
+combo1
+```
+
+## Candidate 2 - A + scaled heatmap + multi-cell-type source-target plot
+
+```{r combo2}
+combo2 <- p_a +
+  (
+    p_b2 /
+      p_c2
+  ) +
+  patchwork::plot_layout(
+    widths = c(
+      1.05,
+      1.35
+    )
+  )
+
+save_plot(
+  combo2,
+  "candidate_figure_AB2C2",
+  width = 15,
+  height = 8.5
+)
+
+combo2
+```
+
+## Candidate 3 - A + dotplot + JUN target lollipop
+
+```{r combo3}
+combo3 <- p_a +
+  (
+    p_b3 /
+      p_c3
+  ) +
+  patchwork::plot_layout(
+    widths = c(
+      1.05,
+      1.35
+    )
+  )
+
+save_plot(
+  combo3,
+  "candidate_figure_AB3C3",
+  width = 15,
+  height = 8.5
+)
+
+combo3
+```
+
+# Selection tables
+
+## TFs selected for panel B
+
+```{r tf-selection-table}
+selection_table
+```
+
+## JUN targets selected for panel C
+
+```{r jun-target-table}
+top_jun_targets
+```
+
+# Saved outputs
+
+```{r outputs}
+saved_files <- list.files(
+  OUTDIR,
+  recursive = TRUE,
+  full.names = FALSE
+)
+
+data.frame(
+  file = saved_files
+)
+```
