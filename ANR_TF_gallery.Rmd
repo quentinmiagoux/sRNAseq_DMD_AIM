@@ -796,7 +796,7 @@ make_B_heatmap_raw <- function(
         -ACTIVITY_LIMIT,
         ACTIVITY_LIMIT
       ),
-      name = "ULM score"
+      name = "ULM activity\n(MOR-weighted)"
     ) +
     ggplot2::labs(
       x = NULL,
@@ -1496,6 +1496,196 @@ make_jun_mor_consistency <- function(
         8,
         5,
         5
+      )
+    )
+}
+```
+
+
+```{r decoupler-target-helper}
+make_decoupler_target_plot <- function(
+  jun_target_df,
+  celltype_focus,
+  top_label_n = 10,
+  tag = "C"
+) {
+
+  lfc_candidates <- c(
+    "log2FoldChange",
+    "logFC",
+    "logfc",
+    "lfc"
+  )
+  p_candidates <- c(
+    "pvalue",
+    "p_value",
+    "padj"
+  )
+
+  lfc_col <- lfc_candidates[
+    lfc_candidates %in% colnames(jun_target_df)
+  ][1]
+  p_col <- p_candidates[
+    p_candidates %in% colnames(jun_target_df)
+  ][1]
+
+  if (is.na(lfc_col) || length(lfc_col) == 0) {
+    stop(
+      "No log-fold-change column found for the decoupleR-style target plot."
+    )
+  }
+
+  if (is.na(p_col) || length(p_col) == 0) {
+    stop(
+      "No p-value column found for the decoupleR-style target plot."
+    )
+  }
+
+  plot_df <- jun_target_df %>%
+    dplyr::filter(
+      celltype == celltype_focus,
+      is.finite(stat),
+      is.finite(mor)
+    ) %>%
+    dplyr::mutate(
+      logfc_plot = as.numeric(.data[[lfc_col]]),
+      p_plot = as.numeric(.data[[p_col]]),
+      p_plot = pmax(
+        p_plot,
+        .Machine$double.xmin
+      ),
+      neglog10_p = -log10(p_plot),
+      mor_x_stat = mor * stat,
+      regulon_support = dplyr::case_when(
+        mor_x_stat > 0 ~ "Supports inferred JUN activity",
+        mor_x_stat < 0 ~ "Opposes inferred JUN activity",
+        TRUE ~ "Neutral"
+      ),
+      significant = !is.na(padj) & padj < 0.05,
+      abs_mor = abs(mor)
+    ) %>%
+    dplyr::filter(
+      is.finite(logfc_plot),
+      is.finite(neglog10_p)
+    )
+
+  label_df <- plot_df %>%
+    dplyr::filter(significant) %>%
+    dplyr::arrange(
+      dplyr::desc(neglog10_p),
+      dplyr::desc(abs(mor_x_stat))
+    ) %>%
+    dplyr::slice_head(
+      n = top_label_n
+    )
+
+  ggplot2::ggplot(
+    plot_df,
+    ggplot2::aes(
+      x = logfc_plot,
+      y = neglog10_p
+    )
+  ) +
+    ggplot2::geom_point(
+      ggplot2::aes(
+        size = abs_mor
+      ),
+      shape = 21,
+      fill = "black",
+      color = "black",
+      alpha = 0.85,
+      stroke = 0
+    ) +
+    ggplot2::geom_point(
+      ggplot2::aes(
+        color = regulon_support,
+        size = abs_mor,
+        alpha = significant
+      )
+    ) +
+    ggrepel::geom_label_repel(
+      data = label_df,
+      ggplot2::aes(
+        label = gene
+      ),
+      size = 3.3,
+      label.size = 0.15,
+      box.padding = 0.25,
+      point.padding = 0.15,
+      max.overlaps = Inf,
+      seed = 1,
+      show.legend = FALSE
+    ) +
+    ggplot2::geom_vline(
+      xintercept = 0,
+      linetype = "dotted",
+      color = "grey45",
+      linewidth = 0.4
+    ) +
+    ggplot2::scale_color_manual(
+      values = c(
+        "Supports inferred JUN activity" = "#B2182B",
+        "Opposes inferred JUN activity" = "#2166AC",
+        "Neutral" = "grey65"
+      ),
+      name = "MOR × DESeq2 stat"
+    ) +
+    ggplot2::scale_alpha_manual(
+      values = c(
+        "TRUE" = 0.95,
+        "FALSE" = 0.20
+      ),
+      guide = "none"
+    ) +
+    ggplot2::scale_size_continuous(
+      range = c(
+        2.0,
+        4.2
+      ),
+      name = "|CollecTRI MOR|"
+    ) +
+    ggplot2::labs(
+      x = "log2FC (DMD vs CTRL)",
+      y = paste0(
+        "-log10(",
+        p_col,
+        ")"
+      ),
+      tag = tag
+    ) +
+    ggplot2::theme_classic(
+      base_size = 12
+    ) +
+    ggplot2::theme(
+      plot.tag = ggplot2::element_text(
+        face = "bold",
+        size = 22
+      ),
+      plot.tag.position = c(
+        0.01,
+        0.99
+      ),
+      axis.title = ggplot2::element_text(
+        size = 11
+      ),
+      axis.text = ggplot2::element_text(
+        size = 9.5
+      ),
+      legend.title = ggplot2::element_text(
+        size = 9.5
+      ),
+      legend.text = ggplot2::element_text(
+        size = 8.5
+      ),
+      legend.key.height = grid::unit(
+        0.34,
+        "cm"
+      ),
+      plot.margin = ggplot2::margin(
+        3,
+        5,
+        4,
+        4
       )
     )
 }
@@ -2225,6 +2415,45 @@ figure_buttons(
 )
 ```
 
+
+## C8 - decoupleR-style JUN target evidence using MOR
+
+This follows the target-level visualization used in the official decoupleR
+transcription-factor vignette: x is DMD-vs-CTRL log2 fold change, y is
+-log10(p-value), target color is determined by the sign of CollecTRI MOR times
+the DESeq2 Wald statistic, and point size represents the absolute MOR.
+
+```{r c8}
+p_c8 <- make_decoupler_target_plot(
+  jun_target_df = jun_target_df,
+  celltype_focus = jun_best_celltype,
+  top_label_n = 9,
+  tag = "C"
+) +
+  ggplot2::ggtitle(
+    paste0(
+      "JUN target evidence — ",
+      jun_best_celltype
+    )
+  )
+
+save_plot(
+  p_c8,
+  "panel_C8_decoupleR_MOR_targets_best_celltype",
+  width = 9.5,
+  height = 6.8
+)
+
+p_c8
+```
+
+```{r c8-downloads, echo=FALSE, results='asis'}
+figure_buttons(
+  "panel_C8_decoupleR_MOR_targets_best_celltype",
+  "Panel C8 - decoupleR MOR"
+)
+```
+
 # Native Python / decoupler representations {.tabset}
 
 These panels call the plotting functions from the scverse Python `decoupler`
@@ -2553,24 +2782,32 @@ figure_buttons(
 ```
 
 
-## Candidate 4 - A + raw ULM heatmap + MOR-weighted JUN targets
+## Candidate 4 - A + MOR-weighted ULM heatmap + decoupleR target evidence
 
-Recommended ANR layout: cell populations, donor-aware TF activity, then a
-compact mechanistic view of JUN targets using CollecTRI MOR.
+Recommended ANR layout. Panel B shows donor-aware CollecTRI ULM activity
+computed with MOR weights. Panel C follows the official decoupleR target-level
+visualization and explicitly uses MOR to interpret JUN target changes.
 
 ```{r combo4}
 p_a_combo4 <- p_a +
   ggplot2::theme(
+    legend.position = "bottom",
     legend.text = ggplot2::element_text(
-      size = 9.5
+      size = 9.0
     ),
     legend.key.height = grid::unit(
-      0.35,
+      0.30,
       "cm"
     ),
     legend.key.width = grid::unit(
-      0.35,
+      0.30,
       "cm"
+    ),
+    plot.margin = ggplot2::margin(
+      3,
+      3,
+      3,
+      3
     )
   )
 
@@ -2582,60 +2819,12 @@ p_b1_combo4 <- p_b1 +
     ),
     axis.text.y = ggplot2::element_text(
       face = "bold",
-      size = 9.5
+      size = 10.5
     ),
     axis.text.x = ggplot2::element_text(
       angle = 35,
       hjust = 1,
       size = 9.5
-    ),
-    legend.title = ggplot2::element_text(
-      size = 10
-    ),
-    legend.text = ggplot2::element_text(
-      size = 9
-    ),
-    plot.margin = ggplot2::margin(
-      4,
-      4,
-      2,
-      4
-    )
-  )
-
-p_c7_combo4 <- make_jun_mor_consistency(
-  jun_target_df = jun_target_df,
-  celltype_focus = jun_best_celltype,
-  top_n = 8,
-  tag = "C"
-) +
-  ggplot2::ggtitle(
-    paste0(
-      "JUN targets — ",
-      jun_best_celltype
-    )
-  ) +
-  ggplot2::labs(
-    x = "DESeq2 Wald × CollecTRI MOR",
-    subtitle = NULL
-  ) +
-  ggplot2::theme(
-    plot.tag = ggplot2::element_text(
-      face = "bold",
-      size = 21
-    ),
-    plot.title = ggplot2::element_text(
-      size = 14
-    ),
-    axis.text.y = ggplot2::element_text(
-      face = "bold",
-      size = 9.5
-    ),
-    axis.text.x = ggplot2::element_text(
-      size = 9.5
-    ),
-    axis.title.x = ggplot2::element_text(
-      size = 10.5
     ),
     legend.title = ggplot2::element_text(
       size = 9.5
@@ -2644,21 +2833,54 @@ p_c7_combo4 <- make_jun_mor_consistency(
       size = 8.5
     ),
     plot.margin = ggplot2::margin(
-      2,
+      3,
+      4,
+      8,
+      4
+    )
+  )
+
+p_c8_combo4 <- p_c8 +
+  ggplot2::theme(
+    plot.tag = ggplot2::element_text(
+      face = "bold",
+      size = 21
+    ),
+    plot.title = ggplot2::element_text(
+      size = 13.5,
+      margin = ggplot2::margin(
+        b = 4
+      )
+    ),
+    axis.title = ggplot2::element_text(
+      size = 10.5
+    ),
+    axis.text = ggplot2::element_text(
+      size = 9
+    ),
+    legend.position = "right",
+    legend.title = ggplot2::element_text(
+      size = 9
+    ),
+    legend.text = ggplot2::element_text(
+      size = 8
+    ),
+    plot.margin = ggplot2::margin(
       4,
       4,
+      3,
       4
     )
   )
 
 right_combo4 <- (
   p_b1_combo4 /
-    p_c7_combo4
+    p_c8_combo4
 ) +
   patchwork::plot_layout(
     heights = c(
-      1.05,
-      0.95
+      0.95,
+      1.35
     )
   )
 
@@ -2666,16 +2888,16 @@ combo4 <- p_a_combo4 +
   right_combo4 +
   patchwork::plot_layout(
     widths = c(
-      0.95,
-      1.55
+      0.92,
+      1.58
     )
   )
 
 save_plot(
   combo4,
-  "candidate_figure_AB1C7_MOR",
+  "candidate_figure_AB1C8_decoupleR_MOR",
   width = 16,
-  height = 10
+  height = 9
 )
 
 combo4
@@ -2683,8 +2905,8 @@ combo4
 
 ```{r combo4-downloads, echo=FALSE, results='asis'}
 figure_buttons(
-  "candidate_figure_AB1C7_MOR",
-  "Candidate 4 - recommended MOR"
+  "candidate_figure_AB1C8_decoupleR_MOR",
+  "Candidate 4 - recommended decoupleR MOR"
 )
 ```
 
