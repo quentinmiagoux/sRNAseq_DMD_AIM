@@ -30,7 +30,8 @@ cran_pkgs <- c(
 
 bioc_pkgs <- c(
   "DESeq2",
-  "decoupleR"
+  "decoupleR",
+  "OmnipathR"
 )
 
 missing_cran <- cran_pkgs[
@@ -276,30 +277,186 @@ message(
 # 4. COLLECTRI NETWORK
 # ==============================================================================
 
-message("Loading CollecTRI...")
+# decoupleR::get_collectri() currently fails on some recent OmnipathR versions
+# when OmniPath falls back to its static table:
+#   Error in if (.keep) . else select(., -!!evs_col)
+#
+# We first try the official decoupleR accessor. If it fails, we use the same
+# OmniPath static CollecTRI table with strict_evidences = FALSE and reproduce
+# the CollecTRI formatting performed internally by decoupleR.
 
-collectri <- decoupleR::get_collectri(
-  organism = "human",
-  split_complexes = FALSE
-)
+load_collectri_safe <- function() {
 
-# Support common decoupleR/CollecTRI column naming variants
-if ("weight" %in% colnames(collectri) && !"mor" %in% colnames(collectri)) {
-  collectri <- collectri %>%
-    dplyr::rename(mor = weight)
-}
+  message("Loading CollecTRI...")
 
-required_net_cols <- c("source", "target", "mor")
-missing_net_cols <- setdiff(required_net_cols, colnames(collectri))
+  net <- tryCatch(
+    {
+      decoupleR::get_collectri(
+        organism = "human",
+        split_complexes = FALSE
+      )
+    },
+    error = function(e) {
 
-if (length(missing_net_cols) > 0) {
-  stop(
-    "Unexpected CollecTRI format. Missing columns: ",
-    paste(missing_net_cols, collapse = ", "),
-    "\nAvailable columns: ",
-    paste(colnames(collectri), collapse = ", ")
+      message(
+        "decoupleR::get_collectri() failed: ",
+        conditionMessage(e)
+      )
+
+      message(
+        "Using OmniPath static CollecTRI fallback ",
+        "(strict_evidences = FALSE)..."
+      )
+
+      raw <- OmnipathR::static_table(
+        query = "interactions",
+        resource = "collectri",
+        organism = 9606L,
+        strict_evidences = FALSE,
+        wide = FALSE
+      )
+
+      required_raw <- c(
+        "source",
+        "source_genesymbol",
+        "target_genesymbol",
+        "is_stimulation",
+        "is_inhibition"
+      )
+
+      missing_raw <- setdiff(
+        required_raw,
+        colnames(raw)
+      )
+
+      if (length(missing_raw) > 0) {
+        stop(
+          "Unexpected OmniPath CollecTRI static-table format. Missing: ",
+          paste(missing_raw, collapse = ", "),
+          "\nAvailable columns: ",
+          paste(colnames(raw), collapse = ", ")
+        )
+      }
+
+      cols <- c(
+        "source_genesymbol",
+        "target_genesymbol",
+        "is_stimulation",
+        "is_inhibition"
+      )
+
+      is_complex <- grepl(
+        "COMPLEX",
+        raw$source,
+        fixed = TRUE
+      )
+
+      interactions <- raw[
+        !is_complex,
+        cols,
+        drop = FALSE
+      ]
+
+      complexes <- raw[
+        is_complex,
+        cols,
+        drop = FALSE
+      ]
+
+      # Same complex handling used by decoupleR when split_complexes = FALSE:
+      # AP-1 family complexes -> AP1
+      # NF-kB/REL family complexes -> NFKB
+      if (nrow(complexes) > 0) {
+        complexes$source_genesymbol <- ifelse(
+          grepl(
+            "JUN|FOS",
+            complexes$source_genesymbol
+          ),
+          "AP1",
+          ifelse(
+            grepl(
+              "REL|NFKB",
+              complexes$source_genesymbol
+            ),
+            "NFKB",
+            complexes$source_genesymbol
+          )
+        )
+      }
+
+      net <- dplyr::bind_rows(
+        interactions,
+        complexes
+      ) %>%
+        dplyr::distinct(
+          source_genesymbol,
+          target_genesymbol,
+          .keep_all = TRUE
+        ) %>%
+        dplyr::mutate(
+          mor = dplyr::case_when(
+            is_stimulation == 1 ~ 1,
+            is_stimulation == 0 ~ -1,
+            TRUE ~ NA_real_
+          )
+        ) %>%
+        dplyr::transmute(
+          source = source_genesymbol,
+          target = target_genesymbol,
+          mor = mor
+        ) %>%
+        dplyr::filter(
+          !is.na(source),
+          !is.na(target),
+          !is.na(mor),
+          source != "",
+          target != ""
+        )
+
+      net
+    }
   )
+
+  required_net_cols <- c(
+    "source",
+    "target",
+    "mor"
+  )
+
+  missing_net_cols <- setdiff(
+    required_net_cols,
+    colnames(net)
+  )
+
+  if (length(missing_net_cols) > 0) {
+    stop(
+      "Unexpected CollecTRI format. Missing columns: ",
+      paste(missing_net_cols, collapse = ", "),
+      "\nAvailable columns: ",
+      paste(colnames(net), collapse = ", ")
+    )
+  }
+
+  net <- net %>%
+    dplyr::select(
+      source,
+      target,
+      mor
+    ) %>%
+    dplyr::distinct()
+
+  message(
+    "CollecTRI loaded: ",
+    nrow(net),
+    " TF-target interactions; ",
+    dplyr::n_distinct(net$source),
+    " regulators."
+  )
+
+  net
 }
+
+collectri <- load_collectri_safe()
 
 # ==============================================================================
 # 5. RAW COUNTS
