@@ -818,7 +818,12 @@ if (length(all_tf) == 0) {
 }
 
 de_all <- dplyr::bind_rows(all_de)
-tf_all <- dplyr::bind_rows(all_tf)
+tf_all <- dplyr::bind_rows(all_tf) %>%
+  dplyr::mutate(
+    source = as.character(source),
+    celltype = as.character(celltype),
+    estimate = as.numeric(estimate)
+  )
 
 write.table(
   de_all,
@@ -863,7 +868,8 @@ top_tfs <- tf_all %>%
   dplyr::slice_head(
     n = TOP_TF_HEATMAP
   ) %>%
-  dplyr::pull(source)
+  dplyr::pull(source) %>%
+  as.character()
 
 heat_df <- tf_all %>%
   dplyr::filter(
@@ -871,16 +877,16 @@ heat_df <- tf_all %>%
   ) %>%
   dplyr::mutate(
     source = factor(
-      source,
-      levels = rev(top_tfs)
+      as.character(source),
+      levels = rev(as.character(top_tfs))
     ),
     celltype = factor(
-      celltype,
-      levels = eligible_celltypes
+      as.character(celltype),
+      levels = as.character(eligible_celltypes)
     ),
     plot_estimate = pmax(
       -4,
-      pmin(4, estimate)
+      pmin(4, as.numeric(estimate))
     )
   )
 
@@ -966,10 +972,7 @@ for (ct in unique(tf_all$celltype)) {
     ) %>%
     dplyr::arrange(estimate) %>%
     dplyr::mutate(
-      source = factor(
-        source,
-        levels = source
-      ),
+      source = as.character(source),
       direction = ifelse(
         estimate >= 0,
         "Higher in DMD",
@@ -977,7 +980,13 @@ for (ct in unique(tf_all$celltype)) {
       ),
       plot_estimate = pmax(
         -4,
-        pmin(4, estimate)
+        pmin(4, as.numeric(estimate))
+      )
+    ) %>%
+    dplyr::mutate(
+      source = stats::reorder(
+        source,
+        plot_estimate
       )
     )
 
