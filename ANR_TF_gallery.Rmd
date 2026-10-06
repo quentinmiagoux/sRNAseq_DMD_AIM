@@ -710,6 +710,7 @@ make_umap <- function(
         0.99
       ),
       legend.position = "right",
+      legend.title = ggplot2::element_blank(),
       legend.text = ggplot2::element_text(
         size = 13
       ),
@@ -718,15 +719,6 @@ make_umap <- function(
       ),
       axis.text = ggplot2::element_blank(),
       axis.ticks = ggplot2::element_blank(),
-      legend.title = ggplot2::element_text(
-        size = 12
-      ),
-      legend.text = ggplot2::element_text(
-        size = 11
-      ),
-      axis.title = ggplot2::element_text(
-        size = 13
-      ),
       plot.margin = ggplot2::margin(
         5,
         5,
