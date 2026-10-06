@@ -1525,9 +1525,22 @@ required_python_modules <- c(
   "igraph"
 )
 
+python_module_list <- paste0(
+  "[",
+  paste(
+    shQuote(
+      required_python_modules,
+      type = "cmd"
+    ),
+    collapse = ","
+  ),
+  "]"
+)
+
+# Build a valid Python list explicitly; do not rely on non-base-R helpers.
 check_code <- paste0(
   "import importlib.util,sys; mods=",
-  repr(required_python_modules),
+  python_module_list,
   "; sys.exit(0 if all(importlib.util.find_spec(m) is not None for m in mods) else 1)"
 )
 
@@ -1556,7 +1569,9 @@ if (!identical(py_status, 0L)) {
       "-m",
       "pip",
       "install",
-      PYTHON_DECOUPLER_SPEC,
+      shQuote(
+        PYTHON_DECOUPLER_SPEC
+      ),
       "pandas",
       "numpy",
       "matplotlib",
