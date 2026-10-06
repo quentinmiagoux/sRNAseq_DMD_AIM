@@ -876,27 +876,93 @@ final_plot <- (
 # 8. EXPORT
 # ------------------------------------------------------------------------------
 
+dir.create(
+  OUTDIR,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+if (!dir.exists(OUTDIR)) {
+  stop(
+    "Could not create output directory: ",
+    OUTDIR
+  )
+}
+
 base_name <- file.path(
   OUTDIR,
   "ANR_preliminary_snRNAseq_TF_activity"
 )
 
-ggplot2::ggsave(
+safe_output_path <- function(path) {
+
+  if (!file.exists(path)) {
+    return(path)
+  }
+
+  removed <- suppressWarnings(
+    file.remove(path)
+  )
+
+  if (isTRUE(removed)) {
+    return(path)
+  }
+
+  ext <- tools::file_ext(path)
+  stem <- sub(
+    paste0("\\.", ext, "$"),
+    "",
+    path
+  )
+
+  fallback <- paste0(
+    stem,
+    "_new.",
+    ext
+  )
+
+  message(
+    "Could not overwrite existing file (possibly open/locked): ",
+    path,
+    "\nWriting instead to: ",
+    fallback
+  )
+
+  fallback
+}
+
+pdf_path <- safe_output_path(
   paste0(
     base_name,
     ".pdf"
-  ),
-  final_plot,
-  width = 12.5,
-  height = 5.4,
-  units = "in"
+  )
 )
 
-ggplot2::ggsave(
+png_path <- safe_output_path(
   paste0(
     base_name,
     ".png"
-  ),
+  )
+)
+
+svg_path <- safe_output_path(
+  paste0(
+    base_name,
+    ".svg"
+  )
+)
+
+ggplot2::ggsave(
+  pdf_path,
+  final_plot,
+  width = 12.5,
+  height = 5.4,
+  units = "in",
+  bg = "white"
+)
+
+ggplot2::ggsave(
+  png_path,
   final_plot,
   width = 12.5,
   height = 5.4,
@@ -906,18 +972,18 @@ ggplot2::ggsave(
 )
 
 ggplot2::ggsave(
-  paste0(
-    base_name,
-    ".svg"
-  ),
+  svg_path,
   final_plot,
   width = 12.5,
   height = 5.4,
   units = "in",
-  device = grDevices::svg
+  device = grDevices::svg,
+  bg = "white"
 )
 
 message(
-  "ANR figure written to: ",
-  normalizePath(OUTDIR)
+  "ANR figure written to:",
+  "\n  PDF: ", pdf_path,
+  "\n  PNG: ", png_path,
+  "\n  SVG: ", svg_path
 )
