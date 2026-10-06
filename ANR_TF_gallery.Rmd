@@ -1351,6 +1351,154 @@ make_jun_lollipop <- function(
 }
 ```
 
+
+make_jun_mor_consistency <- function(
+  jun_target_df,
+  celltype_focus,
+  top_n = 10,
+  tag = "C"
+) {
+
+  plot_df <- jun_target_df %>%
+    dplyr::filter(
+      celltype == celltype_focus,
+      !is.na(padj),
+      padj < 0.05,
+      is.finite(stat),
+      is.finite(mor),
+      is.finite(contribution)
+    ) %>%
+    dplyr::mutate(
+      mor_class = dplyr::if_else(
+        mor > 0,
+        "MOR > 0 (activation)",
+        "MOR < 0 (repression)"
+      ),
+      consistent = contribution > 0
+    ) %>%
+    dplyr::arrange(
+      dplyr::desc(abs(contribution))
+    ) %>%
+    dplyr::slice_head(
+      n = top_n
+    ) %>%
+    dplyr::arrange(contribution) %>%
+    dplyr::mutate(
+      gene = factor(
+        gene,
+        levels = gene
+      )
+    )
+
+  if (nrow(plot_df) == 0) {
+    stop(
+      "No significant JUN targets available for MOR consistency plot in ",
+      celltype_focus,
+      "."
+    )
+  }
+
+  ggplot2::ggplot(
+    plot_df,
+    ggplot2::aes(
+      x = contribution,
+      y = gene
+    )
+  ) +
+    ggplot2::geom_vline(
+      xintercept = 0,
+      linetype = "dashed",
+      color = "grey55",
+      linewidth = 0.4
+    ) +
+    ggplot2::geom_segment(
+      ggplot2::aes(
+        x = 0,
+        xend = contribution,
+        y = gene,
+        yend = gene
+      ),
+      linewidth = 0.85,
+      color = "grey72"
+    ) +
+    ggplot2::geom_point(
+      ggplot2::aes(
+        fill = mor_class,
+        shape = consistent
+      ),
+      size = 4.1,
+      color = "black",
+      stroke = 0.35
+    ) +
+    ggplot2::scale_fill_manual(
+      values = c(
+        "MOR > 0 (activation)" = "#B2182B",
+        "MOR < 0 (repression)" = "#2166AC"
+      ),
+      name = "CollecTRI MOR"
+    ) +
+    ggplot2::scale_shape_manual(
+      values = c(
+        "TRUE" = 21,
+        "FALSE" = 24
+      ),
+      labels = c(
+        "FALSE" = "Opposes JUN activity",
+        "TRUE" = "Supports JUN activity"
+      ),
+      name = NULL
+    ) +
+    ggplot2::labs(
+      x = "Target consistency with JUN activity (DESeq2 Wald x MOR)",
+      y = NULL,
+      tag = tag,
+      subtitle = "Positive values indicate target changes consistent with increased JUN activity"
+    ) +
+    ggplot2::theme_classic(
+      base_size = 13
+    ) +
+    ggplot2::theme(
+      plot.tag = ggplot2::element_text(
+        face = "bold",
+        size = 25
+      ),
+      plot.tag.position = c(
+        0.01,
+        0.99
+      ),
+      plot.subtitle = ggplot2::element_text(
+        size = 11,
+        color = "grey30",
+        margin = ggplot2::margin(
+          b = 7
+        )
+      ),
+      axis.text.y = ggplot2::element_text(
+        face = "bold",
+        size = 12
+      ),
+      axis.text.x = ggplot2::element_text(
+        size = 11
+      ),
+      axis.title.x = ggplot2::element_text(
+        size = 12
+      ),
+      legend.position = "right",
+      legend.title = ggplot2::element_text(
+        size = 11
+      ),
+      legend.text = ggplot2::element_text(
+        size = 10
+      ),
+      plot.margin = ggplot2::margin(
+        5,
+        8,
+        5,
+        5
+      )
+    )
+}
+
 # Load data
 
 ```{r load-data}
@@ -2036,6 +2184,45 @@ figure_buttons(
 )
 ```
 
+
+## C7 - MOR-weighted JUN target consistency
+
+This compact view uses the same CollecTRI mode-of-regulation (MOR) information
+used by decoupler, but avoids the visual collapse of source-target plots when
+many interaction weights are close to -1 or +1. Targets are ranked by the
+signed product of the donor-aware DESeq2 Wald statistic and CollecTRI MOR.
+
+```{r c7}
+p_c7 <- make_jun_mor_consistency(
+  jun_target_df = jun_target_df,
+  celltype_focus = jun_best_celltype,
+  top_n = 10,
+  tag = "C"
+) +
+  ggplot2::ggtitle(
+    paste0(
+      "JUN regulon consistency: ",
+      jun_best_celltype
+    )
+  )
+
+save_plot(
+  p_c7,
+  "panel_C7_JUN_MOR_consistency_best_celltype",
+  width = 9.5,
+  height = 6.8
+)
+
+p_c7
+```
+
+```{r c7-downloads, echo=FALSE, results='asis'}
+figure_buttons(
+  "panel_C7_JUN_MOR_consistency_best_celltype",
+  "Panel C7 - MOR consistency"
+)
+```
+
 # Native Python / decoupler representations {.tabset}
 
 These panels call the plotting functions from the scverse Python `decoupler`
@@ -2360,6 +2547,50 @@ combo1
 figure_buttons(
   "candidate_figure_AB1C1",
   "Candidate 1"
+)
+```
+
+
+## Candidate 4 - A + raw ULM heatmap + MOR-weighted JUN targets
+
+Recommended ANR layout: cell populations, donor-aware TF activity, then a
+compact mechanistic view of JUN targets using CollecTRI MOR.
+
+```{r combo4}
+right_combo4 <- (
+  p_b1 /
+    p_c7
+) +
+  patchwork::plot_layout(
+    heights = c(
+      0.80,
+      1.20
+    )
+  )
+
+combo4 <- p_a +
+  right_combo4 +
+  patchwork::plot_layout(
+    widths = c(
+      1.08,
+      1.42
+    )
+  )
+
+save_plot(
+  combo4,
+  "candidate_figure_AB1C7_MOR",
+  width = 15,
+  height = 9
+)
+
+combo4
+```
+
+```{r combo4-downloads, echo=FALSE, results='asis'}
+figure_buttons(
+  "candidate_figure_AB1C7_MOR",
+  "Candidate 4 - recommended MOR"
 )
 ```
 
