@@ -5,13 +5,13 @@
 #
 # Panel A  : real snRNA-seq UMAP
 # Panel B  : top 10 candidate TF activity heatmap (donor-aware pseudobulk)
-# Panel C  : JUN regulon targets supporting the inferred differential activity
+# Panel C  : JUN-centered regulon network with CollecTRI mode of regulation
 #
 # Statistical interpretation:
 # - The heatmap is the inferential result: donor-aware pseudobulk DESeq2
 #   followed by CollecTRI + decoupleR ULM.
-# - Panel C decomposes the JUN signal into signed target-level contributions
-#   using donor-aware DESeq2 Wald statistics and CollecTRI edge direction.
+# - Panel C separates prior regulatory knowledge (CollecTRI mor on edges) from
+#   project evidence (signed target contribution and recurrence across cell types).
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
@@ -95,7 +95,7 @@ ACTIVITY_DISPLAY_LIMIT <- 4
 # Number of JUN targets shown in Panel C.
 TOP_JUN_TARGETS <- 12
 
-# Display limit for signed JUN-target contributions.
+# Display limit for mean signed JUN-target contribution used as node fill.
 TARGET_DISPLAY_LIMIT <- 4
 
 CELLTYPE_ORDER <- c(
@@ -805,6 +805,9 @@ jun_target_rank <- jun_target_df %>%
       significant,
       na.rm = TRUE
     ),
+    n_celltypes = dplyr::n_distinct(
+      celltype[significant]
+    ),
     max_abs_contribution = max(
       abs(contribution),
       na.rm = TRUE
@@ -820,6 +823,7 @@ jun_target_rank <- jun_target_df %>%
   ) %>%
   dplyr::arrange(
     dplyr::desc(n_supportive),
+    dplyr::desc(n_celltypes),
     dplyr::desc(n_significant),
     dplyr::desc(max_abs_contribution),
     dplyr::desc(mean_contribution)
@@ -854,51 +858,161 @@ write.table(
   row.names = FALSE
 )
 
-jun_heat_df <- jun_target_df %>%
-  dplyr::filter(
-    gene %in% top_jun_targets
+# Build a compact radial network for the ANR figure.
+# The edge carries CollecTRI's mode of regulation (mor), while target-node
+# properties are derived from the donor-aware DMD-vs-CTRL analysis.
+network_targets <- jun_selection %>%
+  dplyr::left_join(
+    focus_net,
+    by = c(
+      "gene" = "target"
+    )
   ) %>%
   dplyr::mutate(
-    plot_contribution = pmax(
+    regulation = dplyr::if_else(
+      mor > 0,
+      "Activation",
+      "Repression"
+    ),
+    node_fill = pmax(
       -TARGET_DISPLAY_LIMIT,
       pmin(
         TARGET_DISPLAY_LIMIT,
-        contribution
+        mean_contribution
       )
-    ),
-    celltype = factor(
-      celltype,
-      levels = celltype_order
-    ),
-    gene = factor(
-      gene,
-      levels = rev(top_jun_targets)
-    ),
-    sig_label = dplyr::if_else(
-      significant,
-      "*",
-      ""
     )
   )
 
-p_targets <- ggplot2::ggplot(
-  jun_heat_df,
-  ggplot2::aes(
-    x = celltype,
-    y = gene,
-    fill = plot_contribution
+# Stable radial coordinates: JUN at the centre, selected targets on a circle.
+angles <- seq(
+  0,
+  2 * pi,
+  length.out = nrow(network_targets) + 1
+)[
+  seq_len(
+    nrow(network_targets)
   )
-) +
-  ggplot2::geom_tile(
+]
+
+network_targets <- network_targets %>%
+  dplyr::mutate(
+    angle = angles,
+    x = cos(angle),
+    y = sin(angle),
+    label_x = 1.18 * cos(angle),
+    label_y = 1.18 * sin(angle),
+    label_hjust = dplyr::if_else(
+      cos(angle) >= 0,
+      0,
+      1
+    )
+  )
+
+edge_df <- network_targets %>%
+  dplyr::transmute(
+    x = 0,
+    y = 0,
+    xend = 0.90 * x,
+    yend = 0.90 * y,
+    regulation
+  )
+
+# Scale node sizes explicitly so the biological meaning is readable even when
+# recurrence spans only a few cell types.
+support_min <- min(
+  network_targets$n_supportive,
+  na.rm = TRUE
+)
+
+support_max <- max(
+  network_targets$n_supportive,
+  na.rm = TRUE
+)
+
+if (
+  is.finite(support_min) &&
+  is.finite(support_max) &&
+  support_max > support_min
+) {
+  network_targets$node_size <- 4 +
+    4 * (
+      network_targets$n_supportive - support_min
+    ) / (
+      support_max - support_min
+    )
+} else {
+  network_targets$node_size <- 6
+}
+
+p_targets <- ggplot2::ggplot() +
+  ggplot2::geom_segment(
+    data = edge_df,
+    ggplot2::aes(
+      x = x,
+      y = y,
+      xend = xend,
+      yend = yend,
+      color = regulation
+    ),
+    linewidth = 0.85,
+    alpha = 0.85,
+    arrow = grid::arrow(
+      type = "closed",
+      length = grid::unit(
+        2.1,
+        "mm"
+      )
+    )
+  ) +
+  ggplot2::geom_point(
+    data = network_targets,
+    ggplot2::aes(
+      x = x,
+      y = y,
+      fill = node_fill,
+      size = node_size
+    ),
+    shape = 21,
+    color = "black",
+    stroke = 0.35
+  ) +
+  ggplot2::geom_point(
+    ggplot2::aes(
+      x = 0,
+      y = 0
+    ),
+    shape = 21,
+    size = 10.5,
+    fill = "grey15",
+    color = "black",
+    stroke = 0.45
+  ) +
+  ggplot2::annotate(
+    "text",
+    x = 0,
+    y = 0,
+    label = TF_FOCUS,
     color = "white",
-    linewidth = 0.55
+    fontface = "bold",
+    size = 3.5
   ) +
   ggplot2::geom_text(
+    data = network_targets,
     ggplot2::aes(
-      label = sig_label
+      x = label_x,
+      y = label_y,
+      label = gene,
+      hjust = label_hjust
     ),
-    size = 2.7,
+    size = 2.8,
     fontface = "bold"
+  ) +
+  ggplot2::scale_color_manual(
+    values = c(
+      "Activation" = "#B2182B",
+      "Repression" = "#2166AC"
+    ),
+    name = "CollecTRI mor"
   ) +
   ggplot2::scale_fill_gradient2(
     low = "#2166AC",
@@ -909,14 +1023,26 @@ p_targets <- ggplot2::ggplot(
       -TARGET_DISPLAY_LIMIT,
       TARGET_DISPLAY_LIMIT
     ),
-    name = "Signed\ntarget\ncontribution"
+    name = "Mean signed\ncontribution"
+  ) +
+  ggplot2::scale_size_identity(
+    guide = "none"
+  ) +
+  ggplot2::coord_equal(
+    xlim = c(
+      -1.42,
+      1.42
+    ),
+    ylim = c(
+      -1.32,
+      1.32
+    ),
+    clip = "off"
   ) +
   ggplot2::labs(
-    tag = "C",
-    x = NULL,
-    y = NULL
+    tag = "C"
   ) +
-  ggplot2::theme_minimal(
+  ggplot2::theme_void(
     base_size = 8.2
   ) +
   ggplot2::theme(
@@ -925,17 +1051,6 @@ p_targets <- ggplot2::ggplot(
       size = 15
     ),
     plot.tag.position = c(0.01, 0.99),
-    axis.text.x = ggplot2::element_text(
-      angle = 38,
-      hjust = 1,
-      vjust = 1,
-      size = 7.0
-    ),
-    axis.text.y = ggplot2::element_text(
-      size = 7.4,
-      face = "bold"
-    ),
-    panel.grid = ggplot2::element_blank(),
     legend.position = "right",
     legend.title = ggplot2::element_text(
       size = 7.0
@@ -943,8 +1058,12 @@ p_targets <- ggplot2::ggplot(
     legend.text = ggplot2::element_text(
       size = 6.8
     ),
+    legend.key.height = grid::unit(
+      0.30,
+      "cm"
+    ),
     plot.margin = ggplot2::margin(
-      3, 4, 3, 4
+      3, 22, 3, 18
     )
   )
 
@@ -954,6 +1073,14 @@ message(
     top_jun_targets,
     collapse = ", "
   )
+)
+
+message(
+  "Panel C mor: ",
+  sum(network_targets$mor > 0, na.rm = TRUE),
+  " activating / ",
+  sum(network_targets$mor < 0, na.rm = TRUE),
+  " repressing JUN-target edges."
 )
 
 # ------------------------------------------------------------------------------
