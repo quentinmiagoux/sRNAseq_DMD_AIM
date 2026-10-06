@@ -5,13 +5,13 @@
 #
 # Panel A  : real snRNA-seq UMAP
 # Panel B  : top 10 candidate TF activity heatmap (donor-aware pseudobulk)
-# Panel C  : per-nucleus JUN activity distribution across DMD cell populations
+# Panel C  : JUN regulon targets supporting the inferred differential activity
 #
 # Statistical interpretation:
 # - The heatmap is the inferential result: donor-aware pseudobulk DESeq2
 #   followed by CollecTRI + decoupleR ULM.
-# - The violin plot is an exploratory per-nucleus visualization of JUN activity.
-#   It is not used for donor-level hypothesis testing.
+# - Panel C decomposes the JUN signal into signed target-level contributions
+#   using donor-aware DESeq2 Wald statistics and CollecTRI edge direction.
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
@@ -22,15 +22,9 @@ INSTALL_MISSING <- TRUE
 
 cran_pkgs <- c(
   "Seurat",
-  "Matrix",
   "dplyr",
   "ggplot2",
-  "patchwork",
-  "tibble"
-)
-
-bioc_pkgs <- c(
-  "decoupleR"
+  "patchwork"
 )
 
 missing_cran <- cran_pkgs[
@@ -51,39 +45,8 @@ if (length(missing_cran) > 0) {
   )
 }
 
-if (!requireNamespace("BiocManager", quietly = TRUE)) {
-  if (!INSTALL_MISSING) {
-    stop("BiocManager is required.")
-  }
-
-  install.packages(
-    "BiocManager",
-    repos = "https://cloud.r-project.org"
-  )
-}
-
-missing_bioc <- bioc_pkgs[
-  !vapply(bioc_pkgs, requireNamespace, logical(1), quietly = TRUE)
-]
-
-if (length(missing_bioc) > 0) {
-  if (!INSTALL_MISSING) {
-    stop(
-      "Missing Bioconductor packages: ",
-      paste(missing_bioc, collapse = ", ")
-    )
-  }
-
-  BiocManager::install(
-    missing_bioc,
-    ask = FALSE,
-    update = FALSE
-  )
-}
-
 suppressPackageStartupMessages({
   library(Seurat)
-  library(Matrix)
   library(dplyr)
   library(ggplot2)
   library(patchwork)
@@ -99,6 +62,12 @@ TF_TABLE <- file.path(
   "results_tf_activity",
   "TF_activity",
   "all_celltypes_CollecTRI_ULM.tsv"
+)
+
+DE_TABLE <- file.path(
+  "results_tf_activity",
+  "DESeq2",
+  "all_celltypes_DMD_vs_CTRL.tsv"
 )
 
 OUTDIR <- file.path(
@@ -123,8 +92,11 @@ TOP_N_TF <- 10
 # Display only. Raw ULM scores remain unchanged.
 ACTIVITY_DISPLAY_LIMIT <- 4
 
-# Minimum regulon size for per-nucleus exploratory activity inference.
-MIN_REGULON_SIZE <- 10
+# Number of JUN targets shown in Panel C.
+TOP_JUN_TARGETS <- 12
+
+# Display limit for signed JUN-target contributions.
+TARGET_DISPLAY_LIMIT <- 4
 
 CELLTYPE_ORDER <- c(
   "Myofibers",
@@ -665,12 +637,11 @@ p_heat <- ggplot2::ggplot(
   )
 
 # ------------------------------------------------------------------------------
-# 5. COLLECTRI JUN REGULON FOR PER-NUCLEUS EXPLORATORY ACTIVITY
+# 5. COLLECTRI JUN REGULON
 # ------------------------------------------------------------------------------
 
-# Avoid an OmnipathR dependency here. In the current conda environment,
-# OmnipathR pulls xml2/rvest and can fail to compile because of system zlib
-# linkage. CollecTRI provides the signed human regulon directly as a static CSV.
+# CollecTRI is loaded directly from its static CSV to avoid any OmnipathR
+# dependency in the figure-generation script.
 COLLECTRI_URL <- "https://rescued.omnipathdb.org/CollecTRI.csv"
 COLLECTRI_CACHE <- file.path(
   OUTDIR,
@@ -685,31 +656,12 @@ load_collectri_static <- function() {
       "Downloading CollecTRI static network..."
     )
 
-    ok <- tryCatch(
-      {
-        utils::download.file(
-          url = COLLECTRI_URL,
-          destfile = COLLECTRI_CACHE,
-          mode = "wb",
-          quiet = FALSE
-        )
-        TRUE
-      },
-      error = function(e) {
-        message(
-          "CollecTRI download failed: ",
-          conditionMessage(e)
-        )
-        FALSE
-      }
+    utils::download.file(
+      url = COLLECTRI_URL,
+      destfile = COLLECTRI_CACHE,
+      mode = "wb",
+      quiet = FALSE
     )
-
-    if (!ok || !file.exists(COLLECTRI_CACHE)) {
-      stop(
-        "Could not download CollecTRI from: ",
-        COLLECTRI_URL
-      )
-    }
   }
 
   raw <- utils::read.csv(
@@ -760,219 +712,212 @@ load_collectri_static <- function() {
 
 collectri <- load_collectri_static()
 
-message(
-  "CollecTRI loaded: ",
-  nrow(collectri),
-  " interactions; ",
-  dplyr::n_distinct(collectri$source),
-  " regulators."
-)
-
 focus_net <- collectri %>%
   dplyr::filter(
     source == TF_FOCUS
-  )
-
-if (nrow(focus_net) < MIN_REGULON_SIZE) {
-  stop(
-    "JUN regulon is too small after loading CollecTRI: ",
-    nrow(focus_net),
-    " interactions."
-  )
-}
-
-# ------------------------------------------------------------------------------
-# 6. PANEL C -- JUN PER-NUCLEUS ACTIVITY VIOLIN
-# ------------------------------------------------------------------------------
-
-DefaultAssay(obj) <- ASSAY
-
-expr <- Seurat::GetAssayData(
-  obj,
-  assay = ASSAY,
-  layer = "data"
-)
-
-focus_targets <- intersect(
-  rownames(expr),
-  unique(focus_net$target)
-)
-
-focus_net_use <- focus_net %>%
-  dplyr::filter(
-    target %in% focus_targets
-  )
-
-if (length(focus_targets) < MIN_REGULON_SIZE) {
-  stop(
-    "Too few JUN targets overlap the RNA assay: ",
-    length(focus_targets)
-  )
-}
-
-message(
-  "Inferring exploratory per-nucleus JUN activity from ",
-  length(focus_targets),
-  " targets..."
-)
-
-# Restrict to JUN targets before inference to keep memory use manageable.
-expr_focus <- expr[
-  focus_targets,
-  ,
-  drop = FALSE
-]
-
-focus_cell <- decoupleR::run_ulm(
-  mat = expr_focus,
-  network = focus_net_use,
-  .source = "source",
-  .target = "target",
-  .mor = "mor",
-  minsize = MIN_REGULON_SIZE
-)
-
-if ("condition" %in% colnames(focus_cell) &&
-    !"sample" %in% colnames(focus_cell)) {
-  focus_cell <- focus_cell %>%
-    dplyr::rename(
-      sample = condition
-    )
-}
-
-if ("score" %in% colnames(focus_cell) &&
-    !"estimate" %in% colnames(focus_cell)) {
-  focus_cell <- focus_cell %>%
-    dplyr::rename(
-      estimate = score
-    )
-}
-
-if (!all(c("sample", "source", "estimate") %in% colnames(focus_cell))) {
-  stop(
-    "Unexpected run_ulm() per-nucleus output columns: ",
-    paste(
-      colnames(focus_cell),
-      collapse = ", "
-    )
-  )
-}
-
-cell_meta <- obj@meta.data %>%
-  tibble::rownames_to_column(
-    "cell_id"
-  ) %>%
-  dplyr::transmute(
-    cell_id = as.character(cell_id),
-    celltype = as.character(.data[[CELLTYPE_COL]]),
-    condition = as.character(.data[[CONDITION_COL]])
-  )
-
-violin_df <- focus_cell %>%
-  dplyr::filter(
-    source == TF_FOCUS
-  ) %>%
-  dplyr::mutate(
-    cell_id = as.character(sample),
-    estimate = as.numeric(estimate)
   ) %>%
   dplyr::select(
-    -sample
-  ) %>%
+    target,
+    mor
+  )
+
+if (nrow(focus_net) == 0) {
+  stop(
+    "No JUN targets were found in CollecTRI."
+  )
+}
+
+# ------------------------------------------------------------------------------
+# 6. PANEL C -- JUN TARGETS SUPPORTING THE INFERRED ACTIVITY
+# ------------------------------------------------------------------------------
+
+if (!file.exists(DE_TABLE)) {
+  stop(
+    "DESeq2 table not found: ",
+    DE_TABLE,
+    "\nRun tf_activity_decoupler.R first."
+  )
+}
+
+de_all <- read.delim(
+  DE_TABLE,
+  stringsAsFactors = FALSE,
+  check.names = FALSE
+) %>%
+  dplyr::mutate(
+    celltype = as.character(celltype),
+    gene = as.character(gene),
+    stat = as.numeric(stat),
+    padj = as.numeric(padj)
+  )
+
+required_de_cols <- c(
+  "celltype",
+  "gene",
+  "stat",
+  "padj"
+)
+
+missing_de_cols <- setdiff(
+  required_de_cols,
+  colnames(de_all)
+)
+
+if (length(missing_de_cols) > 0) {
+  stop(
+    "DE_TABLE is missing required columns: ",
+    paste(missing_de_cols, collapse = ", ")
+  )
+}
+
+# A positive contribution means that the observed DMD-vs-CTRL expression change
+# is concordant with increased JUN activity, after accounting for whether JUN
+# activates or represses that target in CollecTRI.
+jun_target_df <- de_all %>%
   dplyr::inner_join(
-    cell_meta,
-    by = "cell_id"
+    focus_net,
+    by = c(
+      "gene" = "target"
+    )
   ) %>%
   dplyr::filter(
-    condition %in% c(
-      CTRL_LABEL,
-      DMD_LABEL
-    ),
-    celltype %in% celltype_order,
-    is.finite(estimate)
+    is.finite(stat),
+    is.finite(mor),
+    celltype %in% celltype_order
   ) %>%
   dplyr::mutate(
+    contribution = stat * mor,
+    significant = !is.na(padj) & padj < 0.05,
+    supportive = significant & contribution > 0
+  )
+
+# Select targets objectively by recurrence across cell populations first, then
+# by the magnitude of their signed contribution. This favours targets that
+# repeatedly support the JUN inference rather than a single extreme gene.
+jun_target_rank <- jun_target_df %>%
+  dplyr::group_by(gene) %>%
+  dplyr::summarise(
+    n_supportive = sum(
+      supportive,
+      na.rm = TRUE
+    ),
+    n_significant = sum(
+      significant,
+      na.rm = TRUE
+    ),
+    max_abs_contribution = max(
+      abs(contribution),
+      na.rm = TRUE
+    ),
+    mean_contribution = mean(
+      contribution,
+      na.rm = TRUE
+    ),
+    .groups = "drop"
+  ) %>%
+  dplyr::filter(
+    n_supportive > 0
+  ) %>%
+  dplyr::arrange(
+    dplyr::desc(n_supportive),
+    dplyr::desc(n_significant),
+    dplyr::desc(max_abs_contribution),
+    dplyr::desc(mean_contribution)
+  )
+
+top_jun_targets <- jun_target_rank %>%
+  dplyr::slice_head(
+    n = TOP_JUN_TARGETS
+  ) %>%
+  dplyr::pull(gene) %>%
+  as.character()
+
+if (length(top_jun_targets) == 0) {
+  stop(
+    "No significant JUN targets support the inferred activity."
+  )
+}
+
+jun_selection <- jun_target_rank %>%
+  dplyr::filter(
+    gene %in% top_jun_targets
+  )
+
+write.table(
+  jun_selection,
+  file.path(
+    OUTDIR,
+    "ANR_JUN_target_selection.tsv"
+  ),
+  sep = "\t",
+  quote = FALSE,
+  row.names = FALSE
+)
+
+jun_heat_df <- jun_target_df %>%
+  dplyr::filter(
+    gene %in% top_jun_targets
+  ) %>%
+  dplyr::mutate(
+    plot_contribution = pmax(
+      -TARGET_DISPLAY_LIMIT,
+      pmin(
+        TARGET_DISPLAY_LIMIT,
+        contribution
+      )
+    ),
     celltype = factor(
       celltype,
       levels = celltype_order
     ),
-    condition = factor(
-      condition,
-      levels = c(
-        CTRL_LABEL,
-        DMD_LABEL
-      )
+    gene = factor(
+      gene,
+      levels = rev(top_jun_targets)
+    ),
+    sig_label = dplyr::if_else(
+      significant,
+      "*",
+      ""
     )
   )
 
-# Winsorise for visualization only so extreme nuclei do not flatten violins.
-violin_limits <- stats::quantile(
-  violin_df$estimate,
-  probs = c(
-    0.01,
-    0.99
-  ),
-  na.rm = TRUE
-)
-
-violin_df <- violin_df %>%
-  dplyr::mutate(
-    plot_estimate = pmax(
-      violin_limits[[1]],
-      pmin(
-        violin_limits[[2]],
-        estimate
-      )
-    )
-  )
-
-p_violin <- ggplot2::ggplot(
-  violin_df,
+p_targets <- ggplot2::ggplot(
+  jun_heat_df,
   ggplot2::aes(
     x = celltype,
-    y = plot_estimate,
-    fill = condition,
-    group = interaction(
-      celltype,
-      condition
-    )
+    y = gene,
+    fill = plot_contribution
   )
 ) +
-  ggplot2::geom_violin(
-    position = ggplot2::position_dodge(
-      width = 0.82
-    ),
-    scale = "width",
-    trim = TRUE,
-    color = NA,
-    alpha = 0.88
+  ggplot2::geom_tile(
+    color = "white",
+    linewidth = 0.55
   ) +
-  ggplot2::stat_summary(
+  ggplot2::geom_text(
     ggplot2::aes(
-      group = condition
+      label = sig_label
     ),
-    fun = stats::median,
-    geom = "point",
-    position = ggplot2::position_dodge(
-      width = 0.82
-    ),
-    size = 1.15,
-    color = "black"
+    size = 2.7,
+    fontface = "bold"
   ) +
-  ggplot2::scale_fill_manual(
-    values = c(
-      "CTRL" = "#BDBDBD",
-      "DMD" = "#D95F4E"
+  ggplot2::scale_fill_gradient2(
+    low = "#2166AC",
+    mid = "white",
+    high = "#B2182B",
+    midpoint = 0,
+    limits = c(
+      -TARGET_DISPLAY_LIMIT,
+      TARGET_DISPLAY_LIMIT
     ),
-    name = NULL
+    name = "Signed\ntarget\ncontribution"
   ) +
   ggplot2::labs(
     tag = "C",
     x = NULL,
-    y = "JUN activity score"
+    y = NULL
   ) +
-  ggplot2::theme_classic(
-    base_size = 8.5
+  ggplot2::theme_minimal(
+    base_size = 8.2
   ) +
   ggplot2::theme(
     plot.tag = ggplot2::element_text(
@@ -983,26 +928,33 @@ p_violin <- ggplot2::ggplot(
     axis.text.x = ggplot2::element_text(
       angle = 38,
       hjust = 1,
-      size = 7.2
+      vjust = 1,
+      size = 7.0
     ),
     axis.text.y = ggplot2::element_text(
-      size = 7
+      size = 7.4,
+      face = "bold"
     ),
-    axis.title.y = ggplot2::element_text(
-      size = 7.8
+    panel.grid = ggplot2::element_blank(),
+    legend.position = "right",
+    legend.title = ggplot2::element_text(
+      size = 7.0
     ),
-    legend.position = "top",
     legend.text = ggplot2::element_text(
-      size = 7.8
-    ),
-    legend.key.width = grid::unit(
-      0.45,
-      "cm"
+      size = 6.8
     ),
     plot.margin = ggplot2::margin(
       3, 4, 3, 4
     )
   )
+
+message(
+  "JUN targets selected for Panel C: ",
+  paste(
+    top_jun_targets,
+    collapse = ", "
+  )
+)
 
 # ------------------------------------------------------------------------------
 # 7. ASSEMBLE
@@ -1010,7 +962,7 @@ p_violin <- ggplot2::ggplot(
 
 right_panel <- (
   p_heat /
-    p_violin
+    p_targets
 ) +
   patchwork::plot_layout(
     heights = c(
