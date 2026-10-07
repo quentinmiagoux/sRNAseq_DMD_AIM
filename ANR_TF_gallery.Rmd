@@ -1598,6 +1598,7 @@ make_decoupler_target_plot <- function(
   net,
   deg,
   tf = "JUN",
+  top_labels = 15,
   tag = "C"
 ) {
 
@@ -1732,6 +1733,22 @@ make_decoupler_target_plot <- function(
       )
     )
 
+  # Keep all JUN targets as points, but label only the strongest target-level
+  # evidence to avoid an unreadable wall of labels.
+  label_df <- df %>%
+    dplyr::mutate(
+      label_score = abs(
+        mor * t_value
+      )
+    ) %>%
+    dplyr::arrange(
+      dplyr::desc(label_score),
+      p_value
+    ) %>%
+    dplyr::slice_head(
+      n = top_labels
+    )
+
   colors <- rev(
     RColorBrewer::brewer.pal(
       n = 11,
@@ -1768,19 +1785,21 @@ make_decoupler_target_plot <- function(
       )
     ) +
     ggrepel::geom_label_repel(
+      data = label_df,
       mapping = ggplot2::aes(
-        label = ID,
-        size = 1
+        label = ID
       ),
       color = "black",
       fontface = "bold",
+      size = 4.2,
       box.padding = 0.35,
       point.padding = 0.20,
       min.segment.length = 0,
       segment.color = "black",
       segment.size = 0.35,
       seed = 1,
-      max.overlaps = Inf
+      max.overlaps = Inf,
+      show.legend = FALSE
     ) +
     ggplot2::theme_minimal(
       base_size = 14
@@ -2658,6 +2677,7 @@ p_c8 <- make_decoupler_target_plot(
   net = collectri,
   deg = deg_jun,
   tf = tf,
+  top_labels = 15,
   tag = "C"
 )
 
