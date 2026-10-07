@@ -162,8 +162,19 @@ save_plot <- function(
   height = 6
 ) {
 
-  png_path <- file.path(
+  figure_dir <- file.path(
     OUTDIR,
+    filename
+  )
+
+  dir.create(
+    figure_dir,
+    recursive = TRUE,
+    showWarnings = FALSE
+  )
+
+  png_path <- file.path(
+    figure_dir,
     paste0(
       filename,
       ".png"
@@ -171,7 +182,7 @@ save_plot <- function(
   )
 
   pdf_path <- file.path(
-    OUTDIR,
+    figure_dir,
     paste0(
       filename,
       ".pdf"
@@ -179,7 +190,7 @@ save_plot <- function(
   )
 
   svg_path <- file.path(
-    OUTDIR,
+    figure_dir,
     paste0(
       filename,
       ".svg"
@@ -191,7 +202,8 @@ save_plot <- function(
     plot = plot,
     width = width,
     height = height,
-    dpi = 300,
+    units = "in",
+    dpi = 600,
     bg = "white"
   )
 
@@ -200,10 +212,12 @@ save_plot <- function(
     plot = plot,
     width = width,
     height = height,
+    units = "in",
     bg = "white"
   )
 
-  # Use base R's SVG device to avoid an additional svglite/system dependency.
+  # Base SVG keeps text and graphical objects editable without adding a
+  # system-level svglite dependency.
   grDevices::svg(
     filename = svg_path,
     width = width,
@@ -234,30 +248,44 @@ figure_buttons <- function(
     label <- filename
   }
 
-  href_png <- file.path(
+  figure_dir <- file.path(
     OUTDIR,
-    paste0(filename, ".png")
+    filename
+  )
+
+  href_png <- file.path(
+    figure_dir,
+    paste0(
+      filename,
+      ".png"
+    )
   )
 
   href_pdf <- file.path(
-    OUTDIR,
-    paste0(filename, ".pdf")
+    figure_dir,
+    paste0(
+      filename,
+      ".pdf"
+    )
   )
 
   href_svg <- file.path(
-    OUTDIR,
-    paste0(filename, ".svg")
+    figure_dir,
+    paste0(
+      filename,
+      ".svg"
+    )
   )
 
   html <- paste0(
-    "<div style='margin:8px 0 20px 0;display:flex;gap:8px;align-items:center;flex-wrap:wrap;'>",
-    "<span style='font-weight:600;margin-right:4px;'>", label, "</span>",
+    "<div style='margin:8px 0 22px 0;display:flex;gap:8px;align-items:center;flex-wrap:wrap;'>",
+    "<span style='font-weight:700;margin-right:4px;'>", label, "</span>",
     "<a href='", href_png, "' target='_blank' download ",
-    "style='padding:6px 11px;background:#4D9221;color:white;text-decoration:none;border-radius:5px;'>PNG</a>",
-    "<a href='", href_pdf, "' target='_blank' download ",
-    "style='padding:6px 11px;background:#D95F02;color:white;text-decoration:none;border-radius:5px;'>PDF</a>",
+    "style='padding:6px 12px;background:#2E7D32;color:white;text-decoration:none;border-radius:5px;font-weight:700;'>PNG 600 dpi</a>",
     "<a href='", href_svg, "' target='_blank' download ",
-    "style='padding:6px 11px;background:#2166AC;color:white;text-decoration:none;border-radius:5px;'>SVG</a>",
+    "style='padding:6px 12px;background:#1565C0;color:white;text-decoration:none;border-radius:5px;font-weight:700;'>SVG editable</a>",
+    "<a href='", href_pdf, "' target='_blank' download ",
+    "style='padding:6px 12px;background:#EF6C00;color:white;text-decoration:none;border-radius:5px;font-weight:700;'>PDF</a>",
     "</div>"
   )
 
@@ -266,6 +294,68 @@ figure_buttons <- function(
   )
 }
 
+
+publication_theme <- function(
+  axis_text_size = 12,
+  axis_title_size = 14,
+  title_size = 16,
+  legend_text_size = 11,
+  legend_title_size = 12
+) {
+
+  ggplot2::theme(
+    text = ggplot2::element_text(
+      color = "black",
+      face = "bold"
+    ),
+    axis.line = ggplot2::element_line(
+      color = "black",
+      linewidth = 0.65
+    ),
+    axis.ticks = ggplot2::element_line(
+      color = "black",
+      linewidth = 0.55
+    ),
+    axis.text = ggplot2::element_text(
+      color = "black",
+      face = "bold",
+      size = axis_text_size
+    ),
+    axis.title = ggplot2::element_text(
+      color = "black",
+      face = "bold",
+      size = axis_title_size
+    ),
+    plot.title = ggplot2::element_text(
+      color = "black",
+      face = "bold",
+      size = title_size
+    ),
+    plot.subtitle = ggplot2::element_text(
+      color = "black",
+      face = "bold"
+    ),
+    plot.tag = ggplot2::element_text(
+      color = "black",
+      face = "bold"
+    ),
+    strip.text = ggplot2::element_text(
+      color = "black",
+      face = "bold"
+    ),
+    legend.text = ggplot2::element_text(
+      color = "black",
+      face = "bold",
+      size = legend_text_size
+    ),
+    legend.title = ggplot2::element_text(
+      color = "black",
+      face = "bold",
+      size = legend_title_size
+    ),
+    panel.grid = ggplot2::element_blank()
+  )
+}
 
 load_collectri_static <- function(
   cache_dir = OUTDIR
@@ -1505,68 +1595,138 @@ make_jun_mor_consistency <- function(
 
 ```{r decoupler-target-helper}
 make_decoupler_target_plot <- function(
-  jun_target_df,
-  celltype_focus,
+  net,
+  deg,
+  tf = "JUN",
   tag = "C"
 ) {
 
-  required_cols <- c(
-    "log2FoldChange",
-    "pvalue",
-    "stat",
-    "mor",
-    "gene"
+  required_net <- c(
+    "source",
+    "target",
+    "mor"
   )
 
-  missing_cols <- setdiff(
-    required_cols,
-    colnames(jun_target_df)
+  missing_net <- setdiff(
+    required_net,
+    colnames(net)
   )
 
-  if (length(missing_cols) > 0) {
+  if (length(missing_net) > 0) {
     stop(
-      "Missing columns for decoupleR target plot: ",
+      "Network is missing: ",
       paste(
-        missing_cols,
+        missing_net,
         collapse = ", "
       )
     )
   }
 
-  # Reproduce the target-level visualization from the official decoupleR TF
-  # vignette. Red means sign(mor * DE statistic) > 0, blue means < 0.
-  plot_df <- jun_target_df %>%
+  required_deg <- c(
+    "logfc",
+    "t_value",
+    "p_value"
+  )
+
+  missing_deg <- setdiff(
+    required_deg,
+    colnames(deg)
+  )
+
+  if (length(missing_deg) > 0) {
+    stop(
+      "DEG table is missing: ",
+      paste(
+        missing_deg,
+        collapse = ", "
+      )
+    )
+  }
+
+  # Direct adaptation of the target-level plot used in the decoupleR TF
+  # vignette. Here t_value is the donor-aware DESeq2 Wald statistic.
+  df <- net %>%
     dplyr::filter(
-      celltype == celltype_focus,
-      is.finite(log2FoldChange),
-      is.finite(pvalue),
-      is.finite(stat),
-      is.finite(mor)
+      source == tf
     ) %>%
-    dplyr::arrange(gene) %>%
+    dplyr::arrange(target) %>%
     dplyr::mutate(
-      p_plot = pmax(
-        pvalue,
+      ID = target,
+      color = "3"
+    ) %>%
+    tibble::column_to_rownames(
+      "target"
+    )
+
+  inter <- sort(
+    dplyr::intersect(
+      rownames(deg),
+      rownames(df)
+    )
+  )
+
+  if (length(inter) == 0) {
+    stop(
+      "No overlap between ",
+      tf,
+      " targets and DEG table."
+    )
+  }
+
+  df <- df[
+    inter,
+    ,
+    drop = FALSE
+  ]
+
+  df[
+    ,
+    c(
+      "logfc",
+      "t_value",
+      "p_value"
+    )
+  ] <- deg[
+    inter,
+    c(
+      "logfc",
+      "t_value",
+      "p_value"
+    ),
+    drop = FALSE
+  ]
+
+  df <- df %>%
+    dplyr::mutate(
+      p_value = pmax(
+        as.numeric(p_value),
         .Machine$double.xmin
-      ),
-      color = "3",
+      )
+    ) %>%
+    dplyr::mutate(
       color = dplyr::if_else(
-        mor > 0 & stat > 0,
+        mor > 0 & t_value > 0,
         "1",
         color
-      ),
+      )
+    ) %>%
+    dplyr::mutate(
       color = dplyr::if_else(
-        mor > 0 & stat < 0,
+        mor > 0 & t_value < 0,
         "2",
         color
-      ),
+      )
+    ) %>%
+    dplyr::mutate(
       color = dplyr::if_else(
-        mor < 0 & stat > 0,
+        mor < 0 & t_value > 0,
         "2",
         color
-      ),
+      )
+    ) %>%
+    dplyr::mutate(
       color = dplyr::if_else(
-        mor < 0 & stat < 0,
+        mor < 0 & t_value < 0,
         "1",
         color
       )
@@ -1576,90 +1736,83 @@ make_decoupler_target_plot <- function(
     RColorBrewer::brewer.pal(
       n = 11,
       name = "RdBu"
-    )[c(2, 10)]
+    )[
+      c(
+        2,
+        10
+      )
+    ]
   )
 
-  ggplot2::ggplot(
-    data = plot_df,
+  p <- ggplot2::ggplot(
+    data = df,
     mapping = ggplot2::aes(
-      x = log2FoldChange,
-      y = -log10(p_plot),
+      x = logfc,
+      y = -log10(p_value),
       color = color,
       size = abs(mor)
     )
   ) +
     ggplot2::geom_point(
-      size = 2.5,
+      size = 3.6,
       color = "black"
     ) +
     ggplot2::geom_point(
-      size = 1.5
+      size = 2.35
     ) +
     ggplot2::scale_colour_manual(
       values = c(
-        "1" = colors[2],
-        "2" = colors[1],
-        "3" = "grey70"
+        colors[2],
+        colors[1],
+        "grey65"
       )
     ) +
     ggrepel::geom_label_repel(
-      ggplot2::aes(
-        label = gene,
+      mapping = ggplot2::aes(
+        label = ID,
         size = 1
       ),
-      box.padding = 0.25,
-      point.padding = 0.15,
+      color = "black",
+      fontface = "bold",
+      box.padding = 0.35,
+      point.padding = 0.20,
       min.segment.length = 0,
-      seed = 1
+      segment.color = "black",
+      segment.size = 0.35,
+      seed = 1,
+      max.overlaps = Inf
     ) +
     ggplot2::theme_minimal(
-      base_size = 12
+      base_size = 14
     ) +
     ggplot2::theme(
-      legend.position = "none",
-      plot.tag = ggplot2::element_text(
-        face = "bold",
-        size = 22
-      ),
-      plot.tag.position = c(
-        0.01,
-        0.99
-      ),
-      plot.title = ggplot2::element_text(
-        face = "bold",
-        size = 14
-      ),
-      axis.title = ggplot2::element_text(
-        size = 11
-      ),
-      axis.text = ggplot2::element_text(
-        size = 9.5
-      ),
-      panel.grid.minor = ggplot2::element_blank(),
-      plot.margin = ggplot2::margin(
-        4,
-        5,
-        4,
-        4
-      )
+      legend.position = "none"
     ) +
     ggplot2::geom_vline(
       xintercept = 0,
-      linetype = "dotted"
+      linetype = "dotted",
+      color = "black",
+      linewidth = 0.55
     ) +
     ggplot2::geom_hline(
       yintercept = 0,
-      linetype = "dotted"
+      linetype = "dotted",
+      color = "black",
+      linewidth = 0.55
     ) +
+    ggplot2::ggtitle(tf) +
     ggplot2::labs(
       x = "log2FC (DMD vs CTRL)",
       y = "-log10(p-value)",
-      title = paste0(
-        "JUN targets - ",
-        celltype_focus
-      ),
       tag = tag
+    ) +
+    publication_theme(
+      axis_text_size = 13,
+      axis_title_size = 15,
+      title_size = 18
     )
+
+  p
 }
 ```
 
@@ -1725,7 +1878,9 @@ de_all <- read.delim(
   dplyr::mutate(
     celltype = as.character(celltype),
     gene = as.character(gene),
+    log2FoldChange = as.numeric(log2FoldChange),
     stat = as.numeric(stat),
+    pvalue = as.numeric(pvalue),
     padj = as.numeric(padj)
   )
 
@@ -2068,13 +2223,61 @@ outdir.mkdir(parents=True, exist_ok=True)
 def safe_name(x):
     return re.sub(r"[^A-Za-z0-9._-]+", "_", str(x))
 
+def style_native(fig):
+    for ax in fig.axes:
+        for spine in ax.spines.values():
+            spine.set_color("black")
+            spine.set_linewidth(1.0)
+
+        ax.tick_params(
+            axis="both",
+            colors="black",
+            width=1.0,
+        )
+
+        ax.xaxis.label.set_color("black")
+        ax.yaxis.label.set_color("black")
+        ax.xaxis.label.set_fontweight("bold")
+        ax.yaxis.label.set_fontweight("bold")
+
+        for label in ax.get_xticklabels() + ax.get_yticklabels():
+            label.set_color("black")
+            label.set_fontweight("bold")
+
+        if ax.title:
+            ax.title.set_color("black")
+            ax.title.set_fontweight("bold")
+
+    return fig
+
+
 def save_native(fig, stem):
-    png = outdir / f"{stem}.png"
-    pdf = outdir / f"{stem}.pdf"
-    svg = outdir / f"{stem}.svg"
-    fig.savefig(png, dpi=300, bbox_inches="tight", facecolor="white")
-    fig.savefig(pdf, bbox_inches="tight", facecolor="white")
-    fig.savefig(svg, bbox_inches="tight", facecolor="white", format="svg")
+    fig = style_native(fig)
+    figdir = outdir / stem
+    figdir.mkdir(parents=True, exist_ok=True)
+
+    png = figdir / f"{stem}.png"
+    pdf = figdir / f"{stem}.pdf"
+    svg = figdir / f"{stem}.svg"
+
+    fig.savefig(
+        png,
+        dpi=600,
+        bbox_inches="tight",
+        facecolor="white",
+    )
+    fig.savefig(
+        pdf,
+        bbox_inches="tight",
+        facecolor="white",
+    )
+    fig.savefig(
+        svg,
+        bbox_inches="tight",
+        facecolor="white",
+        format="svg",
+    )
+
     return png, pdf, svg
 
 print("Python:", sys.version.split()[0])
@@ -2114,13 +2317,24 @@ if (file.exists(CURRENT_FIG_PNG)) {
 
 # Panel A
 
-```{r panel-a}
+```{r panel-a, fig.width=11, fig.height=8, out.width='100%', fig.align='center'}
 p_a <- make_umap(
   seu = seu,
   reduction_name = reduction_name,
   celltype_col = CELLTYPE_COL,
   celltype_order = celltype_order
 )
+
+p_a <- p_a +
+  publication_theme(
+    axis_text_size = 13,
+    axis_title_size = 15,
+    legend_text_size = 13
+  ) +
+  ggplot2::theme(
+    axis.text = ggplot2::element_blank(),
+    axis.ticks = ggplot2::element_blank()
+  )
 
 save_plot(
   p_a,
@@ -2146,13 +2360,16 @@ figure_buttons(
 Closest to the current ANR representation. ULM scores retain their original
 DMD-vs-CTRL sign and magnitude.
 
-```{r b1}
+```{r b1, fig.width=12, fig.height=6.5, out.width='100%', fig.align='center'}
 p_b1 <- make_B_heatmap_raw(
   tf_all = tf_all,
   tf_sel = tf_sel,
   celltype_order = celltype_order,
   tag = "B"
 )
+
+p_b1 <- p_b1 +
+  publication_theme()
 
 save_plot(
   p_b1,
@@ -2177,13 +2394,16 @@ Inspired by matrix-style single-cell activity summaries. This emphasizes
 relative cell-type specificity within each TF, rather than absolute ULM
 magnitude.
 
-```{r b2}
+```{r b2, fig.width=12, fig.height=6.5, out.width='100%', fig.align='center'}
 p_b2 <- make_B_heatmap_scaled(
   tf_all = tf_all,
   tf_sel = tf_sel,
   celltype_order = celltype_order,
   tag = "B"
 )
+
+p_b2 <- p_b2 +
+  publication_theme()
 
 save_plot(
   p_b2,
@@ -2206,13 +2426,16 @@ figure_buttons(
 
 Color encodes signed ULM activity and point size encodes adjusted significance.
 
-```{r b3}
+```{r b3, fig.width=12, fig.height=6.5, out.width='100%', fig.align='center'}
 p_b3 <- make_B_dotplot(
   tf_all = tf_all,
   tf_sel = tf_sel,
   celltype_order = celltype_order,
   tag = "B"
 )
+
+p_b3 <- p_b3 +
+  publication_theme()
 
 save_plot(
   p_b3,
@@ -2238,7 +2461,7 @@ figure_buttons(
 This follows the source-target logic used by decoupler: CollecTRI mode of
 regulation on the x-axis and the signed DESeq2 Wald statistic on the y-axis.
 
-```{r c1}
+```{r c1, fig.width=9, fig.height=7, out.width='90%', fig.align='center'}
 p_c1 <- make_source_targets_plot(
   jun_target_df = jun_target_df %>%
     dplyr::filter(
@@ -2256,6 +2479,9 @@ p_c1 <- make_source_targets_plot(
       jun_best_celltype
     )
   )
+
+p_c1 <- p_c1 +
+  publication_theme()
 
 save_plot(
   p_c1,
@@ -2279,7 +2505,7 @@ figure_buttons(
 Same representation, faceted over the three cell populations with the strongest
 JUN evidence.
 
-```{r c2}
+```{r c2, fig.width=13, fig.height=8, out.width='100%', fig.align='center'}
 p_c2 <- make_source_targets_plot(
   jun_target_df = jun_target_df %>%
     dplyr::filter(
@@ -2294,6 +2520,9 @@ p_c2 <- make_source_targets_plot(
   ggplot2::ggtitle(
     "JUN source-target view across top cell populations"
   )
+
+p_c2 <- p_c2 +
+  publication_theme()
 
 save_plot(
   p_c2,
@@ -2317,7 +2546,7 @@ figure_buttons(
 A compact lollipop view of the strongest target-level contributions in the
 cell type with the strongest JUN evidence.
 
-```{r c3}
+```{r c3, fig.width=9, fig.height=7, out.width='90%', fig.align='center'}
 p_c3 <- make_jun_lollipop(
   jun_target_df = jun_target_df,
   celltype_focus = jun_best_celltype,
@@ -2330,6 +2559,9 @@ p_c3 <- make_jun_lollipop(
       jun_best_celltype
     )
   )
+
+p_c3 <- p_c3 +
+  publication_theme()
 
 save_plot(
   p_c3,
@@ -2356,7 +2588,7 @@ used by decoupler, but avoids the visual collapse of source-target plots when
 many interaction weights are close to -1 or +1. Targets are ranked by the
 signed product of the donor-aware DESeq2 Wald statistic and CollecTRI MOR.
 
-```{r c7}
+```{r c7, fig.width=9.5, fig.height=6.8, out.width='90%', fig.align='center'}
 p_c7 <- make_jun_mor_consistency(
   jun_target_df = jun_target_df,
   celltype_focus = jun_best_celltype,
@@ -2369,6 +2601,9 @@ p_c7 <- make_jun_mor_consistency(
       jun_best_celltype
     )
   )
+
+p_c7 <- p_c7 +
+  publication_theme()
 
 save_plot(
   p_c7,
@@ -2394,18 +2629,43 @@ This reproduces the target-level visualization from the official decoupleR
 transcription-factor vignette. Red targets have mor x DESeq2 statistic > 0,
 blue targets have mor x DESeq2 statistic < 0, and grey targets are neutral.
 
-```{r c8}
+```{r c8, fig.width=10.5, fig.height=7.5, out.width='100%', fig.align='center'}
+tf <- TF_FOCUS
+
+deg_jun <- de_all %>%
+  dplyr::filter(
+    celltype == jun_best_celltype,
+    !is.na(gene),
+    is.finite(log2FoldChange),
+    is.finite(stat),
+    is.finite(pvalue)
+  ) %>%
+  dplyr::transmute(
+    gene = gene,
+    logfc = log2FoldChange,
+    t_value = stat,
+    p_value = pvalue
+  ) %>%
+  dplyr::distinct(
+    gene,
+    .keep_all = TRUE
+  ) %>%
+  tibble::column_to_rownames(
+    "gene"
+  )
+
 p_c8 <- make_decoupler_target_plot(
-  jun_target_df = jun_target_df,
-  celltype_focus = jun_best_celltype,
+  net = collectri,
+  deg = deg_jun,
+  tf = tf,
   tag = "C"
 )
 
 save_plot(
   p_c8,
   "panel_C8_decoupleR_MOR_targets_best_celltype",
-  width = 9.5,
-  height = 6.8
+  width = 10.5,
+  height = 7.5
 )
 
 p_c8
@@ -2430,7 +2690,7 @@ The native `decoupler.pl.dotplot` is shown for the cell population with the
 strongest JUN evidence. Color is the ULM score and point size is
 `-log10(BH-adjusted p)`.
 
-```{python b4-python-native-dotplot}
+```{python b4-python-native-dotplot, out.width='90%', fig.align='center'}
 b4 = tf.loc[
     (tf["celltype"] == best_celltype)
     & pd.to_numeric(tf["estimate"], errors="coerce").notna()
@@ -2482,7 +2742,7 @@ This is `decoupler.pl.source_targets` itself. The x-axis is the CollecTRI
 interaction weight (mode of regulation) and the y-axis is the DESeq2 Wald
 statistic. Concordant quadrants are colored as positive support by decoupler.
 
-```{python c4-python-source-targets}
+```{python c4-python-source-targets, out.width='90%', fig.align='center'}
 de_best = de.loc[
     de["celltype"] == best_celltype
 ].copy()
@@ -2541,7 +2801,7 @@ figure_buttons(
 
 Each panel below is independently generated by the native decoupler function.
 
-```{python c5-python-source-targets-top3}
+```{python c5-python-source-targets-top3, out.width='90%', fig.align='center'}
 for ct in top_celltypes:
     dct = de.loc[
         de["celltype"] == ct
@@ -2617,7 +2877,7 @@ are therefore assigned from the CollecTRI weights by decoupler itself. Target
 node color is the DESeq2 Wald statistic and the JUN source node is colored by
 its ULM activity score.
 
-```{python c6-python-network}
+```{python c6-python-network, out.width='90%', fig.align='center'}
 target_stats = (
     de.loc[
         de["celltype"] == best_celltype,
@@ -2707,7 +2967,7 @@ figure_buttons(
 
 ## Candidate 1 - A + raw heatmap + single source-target plot
 
-```{r combo1}
+```{r combo1, fig.width=15, fig.height=9, out.width='100%', fig.align='center'}
 right_combo1 <- (
   p_b1 /
     p_c1
@@ -2752,7 +3012,7 @@ Recommended ANR layout. Panel B shows donor-aware CollecTRI ULM activity
 computed with MOR weights. Panel C follows the official decoupleR target-level
 visualization and explicitly uses MOR to interpret JUN target changes.
 
-```{r combo4}
+```{r combo4, fig.width=16, fig.height=9, out.width='100%', fig.align='center'}
 p_a_combo4 <- p_a +
   ggplot2::theme(
     legend.position = "bottom",
@@ -2877,7 +3137,7 @@ figure_buttons(
 
 ## Candidate 2 - A + scaled heatmap + multi-cell-type source-target plot
 
-```{r combo2}
+```{r combo2, fig.width=15, fig.height=9, out.width='100%', fig.align='center'}
 right_combo2 <- (
   p_b2 /
     p_c2
@@ -2917,7 +3177,7 @@ figure_buttons(
 
 ## Candidate 3 - A + dotplot + JUN target lollipop
 
-```{r combo3}
+```{r combo3, fig.width=15, fig.height=9, out.width='100%', fig.align='center'}
 right_combo3 <- (
   p_b3 /
     p_c3
