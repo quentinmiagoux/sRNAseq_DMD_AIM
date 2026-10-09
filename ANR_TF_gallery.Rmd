@@ -34,7 +34,8 @@ cran_pkgs <- c(
   "tibble",
   "tidyr",
   "rmarkdown",
-  "reticulate"
+  "reticulate",
+  "svglite"
 )
 
 missing_cran <- cran_pkgs[
@@ -69,6 +70,7 @@ suppressPackageStartupMessages({
   library(tibble)
   library(tidyr)
   library(reticulate)
+  library(svglite)
 })
 ```
 
@@ -162,6 +164,13 @@ save_plot <- function(
   height = 6
 ) {
 
+  if (!requireNamespace("svglite", quietly = TRUE)) {
+    stop(
+      "Package 'svglite' is required for editable SVG text. ",
+      "Install it with install.packages('svglite')."
+    )
+  }
+
   figure_dir <- file.path(
     OUTDIR,
     filename
@@ -216,18 +225,19 @@ save_plot <- function(
     bg = "white"
   )
 
-  # Base SVG keeps text and graphical objects editable without adding a
-  # system-level svglite dependency.
-  grDevices::svg(
+  # svglite preserves labels as real SVG <text> elements so they remain
+  # editable as text in Inkscape/Illustrator instead of being converted to
+  # glyph paths. fix_text_size = FALSE also keeps text sizing easy to edit.
+  ggplot2::ggsave(
     filename = svg_path,
+    plot = plot,
+    device = svglite::svglite,
     width = width,
     height = height,
+    units = "in",
     bg = "white",
-    onefile = TRUE
+    fix_text_size = FALSE
   )
-
-  print(plot)
-  grDevices::dev.off()
 
   invisible(
     c(
